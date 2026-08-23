@@ -47,14 +47,45 @@ def format_bytes(size_bytes):
     try:
         size = float(size_bytes)
         if size <= 0:
-            return "Unknown"
+            return "0 B"
         for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
             if size < 1024.0 or unit == 'TB':
                 return f"{size:.2f} {unit}" if unit in ['GB', 'TB'] else f"{int(size)} {unit}"
             size /= 1024.0
     except Exception:
         pass
-    return "Unknown"
+    return "0 B"
+
+def format_speed(bps):
+    try:
+        val = float(bps)
+        if val <= 0:
+            return "0 B/s"
+        for unit in ['B/s', 'KB/s', 'MB/s', 'GB/s']:
+            if val < 1024.0 or unit == 'GB/s':
+                return f"{val:.1f} {unit}"
+            val /= 1024.0
+    except Exception:
+        pass
+    return "0 B/s"
+
+def format_eta(seconds):
+    try:
+        sec = int(seconds)
+        if sec >= 8640000 or sec <= 0:
+            return "∞"
+        hours = sec // 3600
+        minutes = (sec % 3600) // 60
+        secs = sec % 60
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        elif minutes > 0:
+            return f"{minutes}m {secs}s"
+        else:
+            return f"{secs}s"
+    except Exception:
+        pass
+    return "∞"
 
 def parse_size_to_bytes(size_str):
     if not size_str:
@@ -87,6 +118,155 @@ def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT):
         if as_xml:
             return ET.fromstring(content)
         return content.decode('utf-8', errors='ignore')
+
+# -----------------------------------------------------------------------------
+# qBittorrent WebUI API Engine
+# -----------------------------------------------------------------------------
+def get_qbittorrent_data(host="127.0.0.1", port=8080):
+    base_url = f"http://{host}:{port}/api/v2"
+    try:
+        ver_req = urllib.request.Request(f"{base_url}/app/version")
+        with urllib.request.urlopen(ver_req, timeout=1.2) as resp:
+            version = resp.read().decode('utf-8').strip()
+
+        transfer_req = urllib.request.Request(f"{base_url}/transfer/info")
+        global_info = {}
+        with urllib.request.urlopen(transfer_req, timeout=1.2) as resp:
+            global_info = json.loads(resp.read().decode('utf-8'))
+
+        torrents_req = urllib.request.Request(f"{base_url}/torrents/info?filter=all")
+        torrents_raw = []
+        with urllib.request.urlopen(torrents_req, timeout=1.5) as resp:
+            torrents_raw = json.loads(resp.read().decode('utf-8'))
+
+        torrents_list = []
+        active_downloads = 0
+        active_uploads = 0
+
+        for t in torrents_raw:
+            state = t.get("state", "unknown")
+            if "downloading" in state.lower() or "stalleddl" in state.lower():
+                active_downloads += 1
+            if "uploading" in state.lower() or "stalledup" in state.lower():
+                active_uploads += 1
+
+            progress = float(t.get("progress", 0.0))
+            progress_pct = round(progress * 100, 1)
+            total_size = int(t.get("total_size", t.get("size", 0)))
+            completed_bytes = int(t.get("completed", total_size * progress))
+            dlspeed = int(t.get("dlspeed", 0))
+            upspeed = int(t.get("upspeed", 0))
+            eta_sec = int(t.get("eta", 8640000))
+
+            state_label = "Downloading"
+            if state in ["pausedDL", "pausedUP"]:
+                state_label = "Paused"
+            elif state in ["uploading", "stalledUP"]:
+                state_label = "Seeding"
+            elif state in ["stalledDL"]:
+                state_label = "Stalled DL"
+            elif state in ["queuedDL", "queuedUP"]:
+                state_label = "Queued"
+            elif state in ["checkingDL", "checkingUP"]:
+                state_label = "Checking"
+            elif state in ["error", "missingFiles"]:
+                state_label = "Error"
+            elif progress >= 1.0:
+                state_label = "Completed"
+
+            torrents_list.append({
+                "hash": t.get("hash", ""),
+                "name": t.get("name", "Unknown Torrent"),
+                "size_bytes": total_size,
+                "size_str": format_bytes(total_size),
+                "completed_bytes": completed_bytes,
+                "completed_str": format_bytes(completed_bytes),
+                "progress": progress,
+                "progress_pct": progress_pct,
+                "dlspeed": dlspeed,
+                "dlspeed_str": format_speed(dlspeed),
+                "upspeed": upspeed,
+                "upspeed_str": format_speed(upspeed),
+                "eta_str": format_eta(eta_sec),
+                "state": state,
+                "state_label": state_label,
+                "seeds": t.get("num_seeds", 0),
+                "peers": t.get("num_leechs", 0),
+                "category": t.get("category", "") or "General",
+                "save_path": t.get("save_path", ""),
+                "added_on": t.get("added_on", 0)
+            })
+
+        torrents_list.sort(key=lambda x: (x["state_label"] != "Downloading", -x["dlspeed"], -x["progress"]))
+
+        dl_speed_global = int(global_info.get("dl_info_speed", 0))
+        up_speed_global = int(global_info.get("up_info_speed", 0))
+
+        return {
+            "status": "connected",
+            "version": version,
+            "global": {
+                "dl_speed": dl_speed_global,
+                "dl_speed_str": format_speed(dl_speed_global),
+                "up_speed": up_speed_global,
+                "up_speed_str": format_speed(up_speed_global),
+                "active_downloads": active_downloads,
+                "active_uploads": active_uploads,
+                "total_torrents": len(torrents_list),
+                "dht_nodes": global_info.get("dht_nodes", 0)
+            },
+            "torrents": torrents_list
+        }
+    except Exception as e:
+        return {
+            "status": "disconnected",
+            "error": str(e),
+            "global": {
+                "dl_speed": 0,
+                "dl_speed_str": "0 B/s",
+                "up_speed": 0,
+                "up_speed_str": "0 B/s",
+                "active_downloads": 0,
+                "active_uploads": 0,
+                "total_torrents": 0
+            },
+            "torrents": []
+        }
+
+def control_qbittorrent(action, target, host="127.0.0.1", port=8080):
+    base_url = f"http://{host}:{port}/api/v2/torrents"
+    try:
+        if action == "pause":
+            url = f"{base_url}/pause"
+            data = urllib.parse.urlencode({"hashes": target}).encode('utf-8')
+            req = urllib.request.Request(url, data=data)
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                return {"status": "success", "action": "pause", "hash": target}
+
+        elif action == "resume":
+            url = f"{base_url}/resume"
+            data = urllib.parse.urlencode({"hashes": target}).encode('utf-8')
+            req = urllib.request.Request(url, data=data)
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                return {"status": "success", "action": "resume", "hash": target}
+
+        elif action == "delete":
+            url = f"{base_url}/delete"
+            data = urllib.parse.urlencode({"hashes": target, "deleteFiles": "false"}).encode('utf-8')
+            req = urllib.request.Request(url, data=data)
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                return {"status": "success", "action": "delete", "hash": target}
+
+        elif action == "add":
+            url = f"{base_url}/add"
+            data = urllib.parse.urlencode({"urls": target}).encode('utf-8')
+            req = urllib.request.Request(url, data=data)
+            with urllib.request.urlopen(req, timeout=2.0) as resp:
+                return {"status": "success", "action": "add", "target": target}
+
+        return {"status": "error", "message": f"Unknown action {action}"}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 # -----------------------------------------------------------------------------
 # Provider 1: The Pirate Bay (via apibay.org)
@@ -549,10 +729,26 @@ def search_all(query, category="all", provider="all", sort_mode="seeds"):
 
 def main():
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: torrent_engine.py --query <search_term> [--category <cat>] [--provider <prov>] [--sort <sort>]"}))
+        print(json.dumps({"error": "Usage: torrent_engine.py --query <search_term> | --qbittorrent | --qb-action <action> <target>"}))
         return
 
     action = sys.argv[1]
+
+    if action == "--qbittorrent":
+        port = 8080
+        if len(sys.argv) > 2 and sys.argv[2].isdigit():
+            port = int(sys.argv[2])
+        print(json.dumps(get_qbittorrent_data(port=port)))
+        return
+
+    if action == "--qb-action" and len(sys.argv) > 3:
+        act = sys.argv[2]
+        target = sys.argv[3]
+        port = 8080
+        if len(sys.argv) > 4 and sys.argv[4].isdigit():
+            port = int(sys.argv[4])
+        print(json.dumps(control_qbittorrent(act, target, port=port)))
+        return
 
     if action == "--test-providers":
         test_out = search_all("ubuntu", category="all", provider="all")

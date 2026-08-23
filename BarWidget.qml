@@ -42,6 +42,7 @@ BarWidget {
   function getStatusColor(panelItem) {
     if (root.opened) return Color.accent
     if (panelItem && panelItem.isSearching) return "#e5c07b"
+    if (panelItem && panelItem.qbConnected && panelItem.qbGlobal && panelItem.qbGlobal.active_downloads > 0) return "#87c095"
     if (panelItem && panelItem.resultsCount > 0) return "#87c095"
     return root.bar ? root.bar.barForeground : Color.foreground
   }
@@ -70,9 +71,17 @@ BarWidget {
     text: "󰚌"
     foreground: getStatusColor(panelLoader.item)
     slotSize: Style.bar.statusSlot
-    tooltipText: (panelLoader.item && panelLoader.item.lastQuery)
-      ? "OmaTorrent: " + panelLoader.item.resultsCount + " results for '" + panelLoader.item.lastQuery + "'"
-      : "OmaTorrent: Multi-Source P2P Search & Magnet Launcher"
+    tooltipText: {
+      var item = panelLoader.item
+      if (!item) return "OmaTorrent: Search & Transfers"
+      if (item.qbConnected && item.qbGlobal && item.qbGlobal.active_downloads > 0) {
+        return "OmaTorrent: " + item.qbGlobal.active_downloads + " downloading (" + item.qbGlobal.dl_speed_str + " 󰜮)"
+      }
+      if (item.lastQuery) {
+        return "OmaTorrent: " + item.resultsCount + " results for '" + item.lastQuery + "'"
+      }
+      return "OmaTorrent: Multi-Source Search & qBittorrent Monitor"
+    }
 
     onPressed: function(b) {
       if (!root.bar) return
