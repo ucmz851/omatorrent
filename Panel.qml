@@ -17,9 +17,10 @@ Panel {
   property var hostWidget: null
   readonly property var barIdentity: hostWidget || root
 
-  readonly property color foreground: bar ? bar.foreground : Color.foreground
-  readonly property color urgent: bar ? bar.urgent : Color.urgent
-  readonly property color dim: Qt.darker(foreground, 1.45)
+  readonly property color foreground: (bar && bar.foreground !== undefined) ? bar.foreground : Color.foreground
+  readonly property color urgent: (bar && bar.urgent !== undefined) ? bar.urgent : Color.urgent
+  readonly property color dim: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.70)
+  readonly property color subtle: Qt.rgba(foreground.r, foreground.g, foreground.b, 0.45)
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   // Main Tab Navigation: "search" | "transfers"
@@ -386,7 +387,7 @@ Panel {
           BorderSurface {
             readonly property bool isSelected: root.activeViewTab === "search"
             width: (parent.width - Style.space(6)) / 2
-            implicitHeight: Style.space(30)
+            implicitHeight: Style.space(32)
             radius: Style.cornerRadius
             color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
             borderSpec: isSelected
@@ -399,17 +400,17 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: ""
-                color: isSelected ? Color.accent : root.foreground
+                color: Color.accent
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: Style.font.body
               }
               Text {
                 textFormat: Text.PlainText
                 text: "Search Indexers"
                 color: isSelected ? Color.accent : root.foreground
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: isSelected
+                font.pixelSize: Style.font.body
+                font.bold: true
               }
             }
 
@@ -427,7 +428,7 @@ Panel {
           BorderSurface {
             readonly property bool isSelected: root.activeViewTab === "transfers"
             width: (parent.width - Style.space(6)) / 2
-            implicitHeight: Style.space(30)
+            implicitHeight: Style.space(32)
             radius: Style.cornerRadius
             color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
             borderSpec: isSelected
@@ -440,9 +441,9 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: "󰚌"
-                color: isSelected ? (root.qbConnected ? "#87c095" : Color.accent) : root.foreground
+                color: root.qbConnected ? "#87c095" : Color.accent
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
+                font.pixelSize: Style.font.body
               }
               Text {
                 textFormat: Text.PlainText
@@ -451,8 +452,8 @@ Panel {
                   : "qBittorrent Transfers"
                 color: isSelected ? (root.qbConnected ? "#87c095" : Color.accent) : root.foreground
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-                font.bold: isSelected
+                font.pixelSize: Style.font.body
+                font.bold: true
               }
             }
 
@@ -535,7 +536,7 @@ Panel {
                   textFormat: Text.PlainText
                   anchors.fill: parent
                   text: "Search movies, shows, games, anime, ISOs..."
-                  color: Qt.darker(root.dim, 1.3)
+                  color: root.subtle
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
                   visible: !searchInput.text && !searchInput.activeFocus
@@ -1360,7 +1361,7 @@ Panel {
           text: root.activeViewTab === "search"
             ? "Click 󰚌 to send to qBittorrent · Click 󰆏 to copy magnet · Esc to close"
             : "Live qBittorrent Controller · Polling active transfers · Esc to close"
-          color: Qt.darker(root.dim, 1.3)
+          color: root.subtle
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
           horizontalAlignment: Text.AlignHCenter
