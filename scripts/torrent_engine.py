@@ -122,13 +122,70 @@ def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT):
 # -----------------------------------------------------------------------------
 # qBittorrent WebUI API Engine
 # -----------------------------------------------------------------------------
+def find_qbittorrent_port(preferred_port=8080):
+    ports_to_try = [preferred_port] if preferred_port else []
+    try:
+        conf_path = os.path.expanduser('~/.config/qBittorrent/qBittorrent.conf')
+        if os.path.exists(conf_path):
+            with open(conf_path, 'r', encoding='utf-8', errors='ignore') as f:
+                text = f.read()
+            m = re.search(r'WebUI[\\/:]Port=(\d+)', text)
+            if m:
+                p = int(m.group(1))
+                if p not in ports_to_try:
+                    ports_to_try.append(p)
+    except Exception:
+        pass
+
+    common_ports = [8080, 8085, 9091, 8000, 8090, 8888, 6881, 8081]
+    for cp in common_ports:
+        if cp not in ports_to_try:
+            ports_to_try.append(cp)
+
+    for p in ports_to_try:
+        try:
+            req = urllib.request.Request(f"http://127.0.0.1:{p}/api/v2/app/version")
+            with urllib.request.urlopen(req, timeout=0.35) as resp:
+                return p
+        except Exception:
+            continue
+    return preferred_port or 8080
+
 def get_qbittorrent_data(host="127.0.0.1", port=8080):
-    base_url = f"http://{host}:{port}/api/v2"
+    actual_port = port or 8080
+    base_url = f"http://{host}:{actual_port}/api/v2"
     try:
         ver_req = urllib.request.Request(f"{base_url}/app/version")
         with urllib.request.urlopen(ver_req, timeout=1.2) as resp:
             version = resp.read().decode('utf-8').strip()
+    except Exception:
+        # Probe other ports if preferred port failed
+        found_port = find_qbittorrent_port(actual_port)
+        if found_port != actual_port:
+            actual_port = found_port
+            base_url = f"http://{host}:{actual_port}/api/v2"
+            try:
+                ver_req = urllib.request.Request(f"{base_url}/app/version")
+                with urllib.request.urlopen(ver_req, timeout=1.2) as resp:
+                    version = resp.read().decode('utf-8').strip()
+            except Exception as e:
+                return {
+                    "status": "disconnected",
+                    "port": actual_port,
+                    "error": str(e),
+                    "global": {"dl_speed": 0, "dl_speed_str": "0 B/s", "up_speed": 0, "up_speed_str": "0 B/s", "active_downloads": 0, "active_uploads": 0, "total_torrents": 0},
+                    "torrents": []
+                }
+        else:
+            return {
+                "status": "disconnected",
+                "port": actual_port,
+                "error": "Connection refused",
+                "global": {"dl_speed": 0, "dl_speed_str": "0 B/s", "up_speed": 0, "up_speed_str": "0 B/s", "active_downloads": 0, "active_uploads": 0, "total_torrents": 0},
+                "torrents": []
+            }
 
+    try:
         transfer_req = urllib.request.Request(f"{base_url}/transfer/info")
         global_info = {}
         with urllib.request.urlopen(transfer_req, timeout=1.2) as resp:
@@ -204,6 +261,7 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
 
         return {
             "status": "connected",
+            "port": actual_port,
             "version": version,
             "global": {
                 "dl_speed": dl_speed_global,
@@ -220,6 +278,7 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
     except Exception as e:
         return {
             "status": "disconnected",
+            "port": actual_port,
             "error": str(e),
             "global": {
                 "dl_speed": 0,

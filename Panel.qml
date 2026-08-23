@@ -44,6 +44,7 @@ Panel {
   // qBittorrent Live State
   property bool qbConnected: false
   property string qbVersion: ""
+  property string qbPortStr: "8080"
   property var qbGlobal: ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0 })
   property var qbTorrents: []
   property bool isPollingQb: false
@@ -112,17 +113,20 @@ Panel {
     searchProc.running = true
   }
 
-  function pollQBittorrent() {
+  function pollQBittorrent(customPort) {
     if (qbPollProc.running) return
     root.isPollingQb = true
     var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
-    qbPollProc.command = ["python3", scriptPath, "--qbittorrent"]
+    var p = (customPort && customPort !== "auto") ? customPort : root.qbPortStr
+    if (customPort === "auto") p = "0"
+    qbPollProc.command = ["python3", scriptPath, "--qbittorrent", (p || "8080")]
     qbPollProc.running = true
   }
 
   function sendQbAction(action, targetHash) {
     var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
-    qbActionProc.command = ["python3", scriptPath, "--qb-action", action, targetHash]
+    var p = root.qbPortStr || "8080"
+    qbActionProc.command = ["python3", scriptPath, "--qb-action", action, targetHash, p]
     qbActionProc.running = true
   }
 
@@ -222,6 +226,7 @@ Panel {
           var data = JSON.parse(text)
           root.qbConnected = (data.status === "connected")
           root.qbVersion = data.version || ""
+          if (data.port) root.qbPortStr = data.port.toString()
           root.qbGlobal = data.global || ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0 })
           root.qbTorrents = data.torrents || []
         } catch (e) {
@@ -391,8 +396,21 @@ Panel {
             Row {
               anchors.centerIn: parent
               spacing: Style.space(6)
-              Text { textFormat: Text.PlainText; text: ""; color: isSelected ? Color.accent : root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-              Text { textFormat: Text.PlainText; text: "Search Indexers"; color: isSelected ? root.foreground : root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: isSelected }
+              Text {
+                textFormat: Text.PlainText
+                text: ""
+                color: isSelected ? Color.accent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+              Text {
+                textFormat: Text.PlainText
+                text: "Search Indexers"
+                color: isSelected ? Color.accent : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                font.bold: isSelected
+              }
             }
 
             MouseArea {
@@ -419,13 +437,19 @@ Panel {
             Row {
               anchors.centerIn: parent
               spacing: Style.space(6)
-              Text { textFormat: Text.PlainText; text: "󰚌"; color: isSelected ? (root.qbConnected ? "#87c095" : Color.accent) : root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+              Text {
+                textFormat: Text.PlainText
+                text: "󰚌"
+                color: isSelected ? (root.qbConnected ? "#87c095" : Color.accent) : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
               Text {
                 textFormat: Text.PlainText
                 text: root.qbConnected && root.qbGlobal.active_downloads > 0
                   ? "Transfers (" + root.qbGlobal.active_downloads + " 󰜮)"
                   : "qBittorrent Transfers"
-                color: isSelected ? root.foreground : root.dim
+                color: isSelected ? (root.qbConnected ? "#87c095" : Color.accent) : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.caption
                 font.bold: isSelected
@@ -1238,8 +1262,64 @@ Panel {
 
                     Text { textFormat: Text.PlainText; text: "1. Open qBittorrent on your desktop."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
                     Text { textFormat: Text.PlainText; text: "2. Go to Tools ➔ Preferences (Alt+O) ➔ Web UI."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "3. Check 'Web User Interface (Remote control)' (Port: 8080)."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "3. Check 'Web User Interface (Remote control)'."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
                     Text { textFormat: Text.PlainText; text: "4. Check 'Bypass authentication for clients on localhost'."; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                  }
+                }
+
+                // Port Configuration Row
+                BorderSurface {
+                  width: parent.width
+                  implicitHeight: Style.space(34)
+                  radius: Style.cornerRadius
+                  color: Style.hoverFillFor(root.foreground, root.foreground)
+                  borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+
+                  RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: Style.space(6)
+                    spacing: Style.space(6)
+
+                    Text { textFormat: Text.PlainText; text: "Port:"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+
+                    TextInput {
+                      id: portInputField
+                      Layout.fillWidth: true
+                      text: root.qbPortStr
+                      color: Color.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                      font.bold: true
+                      selectByMouse: true
+                      clip: true
+                      onTextChanged: root.qbPortStr = portInputField.text.trim()
+                      onAccepted: root.pollQBittorrent(portInputField.text.trim())
+                    }
+
+                    BorderSurface {
+                      implicitWidth: autoPortLabel.implicitWidth + Style.space(10)
+                      implicitHeight: Style.space(22)
+                      radius: Style.cornerRadius
+                      color: "transparent"
+                      borderSpec: Border.controlSpec("normal", Color.accent, Color.accent)
+
+                      Text {
+                        id: autoPortLabel
+                        textFormat: Text.PlainText
+                        anchors.centerIn: parent
+                        text: "Auto-Detect"
+                        color: Color.accent
+                        font.family: root.fontFamily
+                        font.pixelSize: Style.font.caption
+                        font.bold: true
+                      }
+
+                      MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: root.pollQBittorrent("auto")
+                      }
+                    }
                   }
                 }
 
@@ -1258,13 +1338,13 @@ Panel {
                       anchors.centerIn: parent
                       spacing: Style.space(6)
                       Text { textFormat: Text.PlainText; text: ""; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                      Text { textFormat: Text.PlainText; text: "Check Connection Again"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Text { textFormat: Text.PlainText; text: "Connect to Port " + (root.qbPortStr || "8080"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                     }
 
                     MouseArea {
                       anchors.fill: parent
                       cursorShape: Qt.PointingHandCursor
-                      onClicked: root.pollQBittorrent()
+                      onClicked: root.pollQBittorrent(root.qbPortStr)
                     }
                   }
                 }
