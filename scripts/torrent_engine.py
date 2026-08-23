@@ -293,39 +293,45 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
         }
 
 def control_qbittorrent(action, target, host="127.0.0.1", port=8080):
-    base_url = f"http://{host}:{port}/api/v2/torrents"
-    try:
-        if action == "pause":
-            url = f"{base_url}/pause"
-            data = urllib.parse.urlencode({"hashes": target}).encode('utf-8')
-            req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                return {"status": "success", "action": "pause", "hash": target}
+    actual_port = port or 8080
+    base_url = f"http://{host}:{actual_port}/api/v2/torrents"
+    endpoints = []
+    data_dict = {}
 
-        elif action == "resume":
-            url = f"{base_url}/resume"
-            data = urllib.parse.urlencode({"hashes": target}).encode('utf-8')
-            req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                return {"status": "success", "action": "resume", "hash": target}
-
-        elif action == "delete":
-            url = f"{base_url}/delete"
-            data = urllib.parse.urlencode({"hashes": target, "deleteFiles": "false"}).encode('utf-8')
-            req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                return {"status": "success", "action": "delete", "hash": target}
-
-        elif action == "add":
-            url = f"{base_url}/add"
-            data = urllib.parse.urlencode({"urls": target}).encode('utf-8')
-            req = urllib.request.Request(url, data=data)
-            with urllib.request.urlopen(req, timeout=2.0) as resp:
-                return {"status": "success", "action": "add", "target": target}
-
+    if action in ["pause", "stop"]:
+        # qBittorrent 5.0+ uses /stop, 4.x uses /pause
+        endpoints = [f"{base_url}/stop", f"{base_url}/pause"]
+        data_dict = {"hashes": target}
+    elif action in ["resume", "start"]:
+        # qBittorrent 5.0+ uses /start, 4.x uses /resume
+        endpoints = [f"{base_url}/start", f"{base_url}/resume"]
+        data_dict = {"hashes": target}
+    elif action == "delete":
+        endpoints = [f"{base_url}/delete"]
+        data_dict = {"hashes": target, "deleteFiles": "false"}
+    elif action == "add":
+        endpoints = [f"{base_url}/add"]
+        data_dict = {"urls": target}
+    else:
         return {"status": "error", "message": f"Unknown action {action}"}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
+
+    encoded_data = urllib.parse.urlencode(data_dict).encode('utf-8')
+    last_err = ""
+    for ep in endpoints:
+        try:
+            req = urllib.request.Request(ep, data=encoded_data)
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                return {"status": "success", "action": action, "target": target}
+        except urllib.error.HTTPError as he:
+            last_err = f"HTTP {he.code}: {he.reason}"
+            if he.code in [404, 400]:
+                continue
+            return {"status": "error", "message": last_err}
+        except Exception as e:
+            last_err = str(e)
+            continue
+
+    return {"status": "error", "message": last_err or f"Action '{action}' failed"}
 
 # -----------------------------------------------------------------------------
 # Provider 1: The Pirate Bay (via apibay.org)
