@@ -230,7 +230,7 @@ Panel {
             id: headerTextCol
             anchors.left: headerIcon.right
             anchors.leftMargin: Style.space(10)
-            anchors.right: headerActionRow.left
+            anchors.right: closeBtn.left
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
@@ -276,42 +276,13 @@ Panel {
             }
           }
 
-          Row {
-            id: headerActionRow
+          PanelActionButton {
+            id: closeBtn
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.space(4)
-
-            // New / Reset search button
-            BorderSurface {
-              visible: root.resultsCount > 0 || (searchInput && searchInput.text !== "")
-              implicitWidth: clearText.implicitWidth + Style.space(10)
-              implicitHeight: Style.space(26)
-              anchors.verticalCenter: parent.verticalCenter
-              radius: Style.cornerRadius
-              color: Style.hoverFillFor(root.foreground, root.foreground)
-              borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
-
-              Row {
-                anchors.centerIn: parent
-                spacing: Style.space(4)
-                Text { textFormat: Text.PlainText; text: "󰅖"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                Text { id: clearText; textFormat: Text.PlainText; text: "New Search"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
-              }
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.clearSearch()
-              }
-            }
-
-            PanelActionButton {
-              id: closeBtn
-              iconText: "✕"
-              tooltipText: "Close (Esc)"
-              onClicked: root.close()
-            }
+            iconText: "✕"
+            tooltipText: "Close (Esc)"
+            onClicked: root.close()
           }
         }
 
