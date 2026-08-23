@@ -191,6 +191,24 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
         with urllib.request.urlopen(transfer_req, timeout=1.2) as resp:
             global_info = json.loads(resp.read().decode('utf-8'))
 
+        # Fetch preferences for save_path, global limits, alt speed
+        prefs = {}
+        try:
+            prefs_req = urllib.request.Request(f"{base_url}/app/preferences")
+            with urllib.request.urlopen(prefs_req, timeout=1.2) as resp:
+                prefs = json.loads(resp.read().decode('utf-8'))
+        except Exception:
+            pass
+
+        # Fetch speedLimitsMode
+        alt_mode = False
+        try:
+            mode_req = urllib.request.Request(f"{base_url}/transfer/speedLimitsMode")
+            with urllib.request.urlopen(mode_req, timeout=1.0) as resp:
+                alt_mode = (resp.read().decode('utf-8').strip() == "1")
+        except Exception:
+            pass
+
         torrents_req = urllib.request.Request(f"{base_url}/torrents/info?filter=all")
         torrents_raw = []
         with urllib.request.urlopen(torrents_req, timeout=1.5) as resp:
@@ -214,9 +232,13 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
             dlspeed = int(t.get("dlspeed", 0))
             upspeed = int(t.get("upspeed", 0))
             eta_sec = int(t.get("eta", 8640000))
+            t_dl_limit = int(t.get("dl_limit", 0))
+            t_up_limit = int(t.get("up_limit", 0))
+            ratio = round(float(t.get("ratio", 0.0)), 2)
+            forced = bool(t.get("force_start", False))
 
             state_label = "Downloading"
-            if state in ["pausedDL", "pausedUP"]:
+            if state in ["pausedDL", "pausedUP", "stoppedDL", "stoppedUP"]:
                 state_label = "Paused"
             elif state in ["uploading", "stalledUP"]:
                 state_label = "Seeding"
@@ -251,6 +273,13 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "peers": t.get("num_leechs", 0),
                 "category": t.get("category", "") or "General",
                 "save_path": t.get("save_path", ""),
+                "content_path": t.get("content_path", t.get("save_path", "")),
+                "dl_limit": t_dl_limit,
+                "dl_limit_str": format_speed(t_dl_limit) if t_dl_limit > 0 else "Unlimited",
+                "up_limit": t_up_limit,
+                "up_limit_str": format_speed(t_up_limit) if t_up_limit > 0 else "Unlimited",
+                "ratio": ratio,
+                "forced": forced,
                 "added_on": t.get("added_on", 0)
             })
 
@@ -258,6 +287,11 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
 
         dl_speed_global = int(global_info.get("dl_info_speed", 0))
         up_speed_global = int(global_info.get("up_info_speed", 0))
+        global_dl_limit = int(prefs.get("dl_limit", 0))
+        global_up_limit = int(prefs.get("up_limit", 0))
+        save_path = prefs.get("save_path", "/home/ucheema/Downloads")
+        alt_dl_limit = int(prefs.get("alt_dl_limit", 10240))
+        alt_up_limit = int(prefs.get("alt_up_limit", 10240))
 
         return {
             "status": "connected",
@@ -271,7 +305,15 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "active_downloads": active_downloads,
                 "active_uploads": active_uploads,
                 "total_torrents": len(torrents_list),
-                "dht_nodes": global_info.get("dht_nodes", 0)
+                "dht_nodes": global_info.get("dht_nodes", 0),
+                "save_path": save_path,
+                "dl_limit": global_dl_limit,
+                "dl_limit_str": format_speed(global_dl_limit) if global_dl_limit > 0 else "Unlimited",
+                "up_limit": global_up_limit,
+                "up_limit_str": format_speed(global_up_limit) if global_up_limit > 0 else "Unlimited",
+                "alt_mode": alt_mode,
+                "alt_dl_limit_str": format_speed(alt_dl_limit),
+                "alt_up_limit_str": format_speed(alt_up_limit)
             },
             "torrents": torrents_list
         }
@@ -287,31 +329,66 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "up_speed_str": "0 B/s",
                 "active_downloads": 0,
                 "active_uploads": 0,
-                "total_torrents": 0
+                "total_torrents": 0,
+                "save_path": "/home/ucheema/Downloads",
+                "dl_limit_str": "Unlimited",
+                "up_limit_str": "Unlimited",
+                "alt_mode": False
             },
             "torrents": []
         }
 
-def control_qbittorrent(action, target, host="127.0.0.1", port=8080):
+def control_qbittorrent(action, target, extra=None, host="127.0.0.1", port=8080):
     actual_port = port or 8080
-    base_url = f"http://{host}:{actual_port}/api/v2/torrents"
+    base_api = f"http://{host}:{actual_port}/api/v2"
+    torrents_url = f"{base_api}/torrents"
+    transfer_url = f"{base_api}/transfer"
+    app_url = f"{base_api}/app"
+
     endpoints = []
     data_dict = {}
 
     if action in ["pause", "stop"]:
-        # qBittorrent 5.0+ uses /stop, 4.x uses /pause
-        endpoints = [f"{base_url}/stop", f"{base_url}/pause"]
+        endpoints = [f"{torrents_url}/stop", f"{torrents_url}/pause"]
         data_dict = {"hashes": target}
     elif action in ["resume", "start"]:
-        # qBittorrent 5.0+ uses /start, 4.x uses /resume
-        endpoints = [f"{base_url}/start", f"{base_url}/resume"]
+        endpoints = [f"{torrents_url}/start", f"{torrents_url}/resume"]
         data_dict = {"hashes": target}
     elif action == "delete":
-        endpoints = [f"{base_url}/delete"]
-        data_dict = {"hashes": target, "deleteFiles": "false"}
+        endpoints = [f"{torrents_url}/delete"]
+        data_dict = {"hashes": target, "deleteFiles": "true" if extra in ["1", "true", True] else "false"}
     elif action == "add":
-        endpoints = [f"{base_url}/add"]
+        endpoints = [f"{torrents_url}/add"]
         data_dict = {"urls": target}
+        if extra and extra != "-":
+            data_dict["savepath"] = extra
+    elif action == "set_global_dl_limit":
+        endpoints = [f"{transfer_url}/setDownloadLimit"]
+        data_dict = {"limit": int(target)}
+    elif action == "set_global_up_limit":
+        endpoints = [f"{transfer_url}/setUploadLimit"]
+        data_dict = {"limit": int(target)}
+    elif action == "toggle_alt_speed":
+        endpoints = [f"{transfer_url}/toggleSpeedLimitsMode"]
+        data_dict = {}
+    elif action == "set_global_save_path":
+        endpoints = [f"{app_url}/setPreferences"]
+        data_dict = {"json": json.dumps({"save_path": target})}
+    elif action == "set_torrent_dl_limit":
+        endpoints = [f"{torrents_url}/setDownloadLimit"]
+        data_dict = {"hashes": target, "limit": int(extra or 0)}
+    elif action == "set_torrent_up_limit":
+        endpoints = [f"{torrents_url}/setUploadLimit"]
+        data_dict = {"hashes": target, "limit": int(extra or 0)}
+    elif action == "set_torrent_location":
+        endpoints = [f"{torrents_url}/setLocation"]
+        data_dict = {"hashes": target, "location": extra or ""}
+    elif action == "toggle_force":
+        endpoints = [f"{torrents_url}/setForceStart"]
+        data_dict = {"hashes": target, "value": "true" if extra in ["1", "true", True] else "false"}
+    elif action == "recheck":
+        endpoints = [f"{torrents_url}/recheck"]
+        data_dict = {"hashes": target}
     else:
         return {"status": "error", "message": f"Unknown action {action}"}
 
@@ -806,13 +883,18 @@ def main():
         print(json.dumps(get_qbittorrent_data(port=port)))
         return
 
-    if action == "--qb-action" and len(sys.argv) > 3:
+    if action == "--qb-action" and len(sys.argv) >= 3:
         act = sys.argv[2]
-        target = sys.argv[3]
+        target = sys.argv[3] if len(sys.argv) > 3 else ""
+        extra = sys.argv[4] if len(sys.argv) > 4 else None
         port = 8080
-        if len(sys.argv) > 4 and sys.argv[4].isdigit():
-            port = int(sys.argv[4])
-        print(json.dumps(control_qbittorrent(act, target, port=port)))
+        if len(sys.argv) > 5 and sys.argv[5].isdigit():
+            port = int(sys.argv[5])
+        elif extra and extra.isdigit() and int(extra) in [8080, 8085, 9091, 8000, 8090, 8888, 6881, 8081]:
+            if act not in ["set_global_dl_limit", "set_global_up_limit", "set_torrent_dl_limit", "set_torrent_up_limit"]:
+                port = int(extra)
+                extra = None
+        print(json.dumps(control_qbittorrent(act, target, extra=extra, port=port)))
         return
 
     if action == "--test-providers":

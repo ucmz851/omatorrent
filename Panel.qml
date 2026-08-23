@@ -42,13 +42,35 @@ Panel {
   property bool providerDropdownOpen: false
   property bool sortDropdownOpen: false
 
-  // qBittorrent Live State
+  // qBittorrent Live State & Advanced Controls
   property bool qbConnected: false
   property string qbVersion: ""
   property string qbPortStr: "8080"
-  property var qbGlobal: ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0 })
+  property var qbGlobal: ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0, save_path: "/home/ucheema/Downloads", dl_limit: 0, dl_limit_str: "Unlimited", up_limit: 0, up_limit_str: "Unlimited", alt_mode: false, alt_dl_limit_str: "10 KB/s", alt_up_limit_str: "10 KB/s" })
   property var qbTorrents: []
   property bool isPollingQb: false
+  property string expandedTorrentHash: ""
+  property bool showGlobalLimitsMenu: false
+  property bool showSavePathEdit: false
+  property string customPathInputText: ""
+
+  readonly property var globalSpeedPresets: [
+    { label: "Unlimited", val: "0" },
+    { label: "1 MB/s", val: "1048576" },
+    { label: "5 MB/s", val: "5242880" },
+    { label: "10 MB/s", val: "10485760" },
+    { label: "25 MB/s", val: "26214400" },
+    { label: "50 MB/s", val: "52428800" }
+  ]
+
+  readonly property var globalUpPresets: [
+    { label: "Unlimited", val: "0" },
+    { label: "250 KB/s", val: "256000" },
+    { label: "500 KB/s", val: "512000" },
+    { label: "1 MB/s", val: "1048576" },
+    { label: "2 MB/s", val: "2097152" },
+    { label: "5 MB/s", val: "5242880" }
+  ]
 
   readonly property var categoryList: [
     { id: "all", label: "All" },
@@ -124,10 +146,12 @@ Panel {
     qbPollProc.running = true
   }
 
-  function sendQbAction(action, targetHash) {
+  function sendQbAction(action, targetHash, extraArg) {
     var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
     var p = panelRoot.qbPortStr || "8080"
-    qbActionProc.command = ["python3", scriptPath, "--qb-action", action, targetHash, p]
+    var target = (targetHash !== undefined && targetHash !== null) ? targetHash.toString() : "-"
+    var extra = (extraArg !== undefined && extraArg !== null) ? extraArg.toString() : "-"
+    qbActionProc.command = ["python3", scriptPath, "--qb-action", action, target, extra, p]
     qbActionProc.running = true
   }
 
@@ -1003,52 +1027,322 @@ Panel {
             width: parent.width
             spacing: Style.space(8)
 
-            // Global Speeds Card
+            // Global Speeds & Settings Card
             BorderSurface {
               width: parent.width
-              implicitHeight: speedGrid.implicitHeight + Style.space(16)
+              implicitHeight: globalHeaderCol.implicitHeight + Style.space(16)
               color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
               borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
               radius: Style.cornerRadius
 
-              RowLayout {
-                id: speedGrid
+              Column {
+                id: globalHeaderCol
                 anchors.left: parent.left
                 anchors.right: parent.right
                 anchors.top: parent.top
                 anchors.margins: Style.space(8)
-                spacing: Style.space(10)
+                spacing: Style.space(8)
 
-                // Download Stat
-                Column {
-                  Layout.fillWidth: true
-                  spacing: Style.space(2)
-                  Row {
-                    spacing: Style.space(4)
-                    Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "Download Speed"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                // Row 1: Speeds & Quick Toggles
+                RowLayout {
+                  width: parent.width
+                  spacing: Style.space(10)
+
+                  // Download Stat
+                  Column {
+                    Layout.fillWidth: true
+                    spacing: Style.space(2)
+                    Row {
+                      spacing: Style.space(4)
+                      Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: "Download Speed"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    }
+                    Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.dl_speed_str; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
                   }
-                  Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.dl_speed_str; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+
+                  // Upload Stat
+                  Column {
+                    Layout.fillWidth: true
+                    spacing: Style.space(2)
+                    Row {
+                      spacing: Style.space(4)
+                      Text { textFormat: Text.PlainText; text: "󰜵"; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: "Upload Speed"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    }
+                    Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.up_speed_str; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+                  }
+
+                  // Alt Speed Toggle (Turtle Mode)
+                  BorderSurface {
+                    implicitWidth: altSpeedRow.implicitWidth + Style.space(10)
+                    implicitHeight: Style.space(28)
+                    radius: Style.cornerRadius
+                    color: panelRoot.qbGlobal.alt_mode ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                    borderSpec: panelRoot.qbGlobal.alt_mode
+                      ? Border.controlSpec("selected", Color.accent, Color.accent)
+                      : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                    Row {
+                      id: altSpeedRow
+                      anchors.centerIn: parent
+                      spacing: Style.space(4)
+                      Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.alt_mode ? "󱥸" : "󰓅"; color: panelRoot.qbGlobal.alt_mode ? Color.accent : panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.alt_mode ? "Alt Limit ON" : "Full Speed"; color: panelRoot.qbGlobal.alt_mode ? Color.accent : panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: panelRoot.qbGlobal.alt_mode }
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: panelRoot.sendQbAction("toggle_alt_speed")
+                    }
+                  }
+
+                  // Refresh Action
+                  PanelActionButton {
+                    iconText: ""
+                    tooltipText: "Refresh Transfers"
+                    foreground: Color.accent
+                    onClicked: panelRoot.pollQBittorrent()
+                  }
                 }
 
-                // Upload Stat
-                Column {
-                  Layout.fillWidth: true
-                  spacing: Style.space(2)
-                  Row {
-                    spacing: Style.space(4)
-                    Text { textFormat: Text.PlainText; text: "󰜵"; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "Upload Speed"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                // Row 2: Default Save Path & Global Limit Toggles
+                RowLayout {
+                  width: parent.width
+                  spacing: Style.space(6)
+
+                  // Save Path Display Pill
+                  BorderSurface {
+                    Layout.fillWidth: true
+                    implicitHeight: Style.space(26)
+                    radius: Style.cornerRadius
+                    color: "transparent"
+                    borderSpec: Border.controlSpec("normal", panelRoot.subtle, Color.accent)
+
+                    RowLayout {
+                      anchors.fill: parent
+                      anchors.leftMargin: Style.space(6)
+                      anchors.rightMargin: Style.space(4)
+                      spacing: Style.space(4)
+
+                      Text { textFormat: Text.PlainText; text: "󰉋"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text {
+                        textFormat: Text.PlainText
+                        Layout.fillWidth: true
+                        text: panelRoot.qbGlobal.save_path || "/home/Downloads"
+                        color: panelRoot.foreground
+                        font.family: panelRoot.fontFamily
+                        font.pixelSize: Style.font.caption
+                        elide: Text.ElideMiddle
+                      }
+
+                      PanelActionButton {
+                        iconText: "󰉋"
+                        tooltipText: "Open in File Manager"
+                        onClicked: Quickshell.execDetached(["xdg-open", panelRoot.qbGlobal.save_path || "/home/ucheema/Downloads"])
+                      }
+
+                      PanelActionButton {
+                        iconText: "󰏫"
+                        tooltipText: "Change Default Download Directory"
+                        onClicked: {
+                          panelRoot.customPathInputText = panelRoot.qbGlobal.save_path || "/home/ucheema/Downloads"
+                          panelRoot.showSavePathEdit = !panelRoot.showSavePathEdit
+                        }
+                      }
+                    }
                   }
-                  Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.up_speed_str; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+
+                  // Global Limits Dropdown Toggle Button
+                  BorderSurface {
+                    implicitWidth: limitsBtnRow.implicitWidth + Style.space(10)
+                    implicitHeight: Style.space(26)
+                    radius: Style.cornerRadius
+                    color: panelRoot.showGlobalLimitsMenu ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                    borderSpec: panelRoot.showGlobalLimitsMenu
+                      ? Border.controlSpec("selected", Color.accent, Color.accent)
+                      : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                    Row {
+                      id: limitsBtnRow
+                      anchors.centerIn: parent
+                      spacing: Style.space(4)
+                      Text { textFormat: Text.PlainText; text: "󰛳"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text {
+                        textFormat: Text.PlainText
+                        text: "Limits (DL: " + panelRoot.qbGlobal.dl_limit_str + " · UP: " + panelRoot.qbGlobal.up_limit_str + ")"
+                        color: panelRoot.showGlobalLimitsMenu ? Color.accent : panelRoot.foreground
+                        font.family: panelRoot.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+                      Text { textFormat: Text.PlainText; text: panelRoot.showGlobalLimitsMenu ? "▲" : "▼"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    }
+
+                    MouseArea {
+                      anchors.fill: parent
+                      cursorShape: Qt.PointingHandCursor
+                      onClicked: panelRoot.showGlobalLimitsMenu = !panelRoot.showGlobalLimitsMenu
+                    }
+                  }
                 }
 
-                // Refresh Action
-                PanelActionButton {
-                  iconText: ""
-                  tooltipText: "Refresh Transfers"
-                  foreground: Color.accent
-                  onClicked: panelRoot.pollQBittorrent()
+                // Expandable Section A: Save Path Editor
+                BorderSurface {
+                  visible: panelRoot.showSavePathEdit
+                  width: parent.width
+                  implicitHeight: Style.space(32)
+                  radius: Style.cornerRadius
+                  color: Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground)
+                  borderSpec: Border.controlSpec("selected", Color.accent, Color.accent)
+
+                  RowLayout {
+                    anchors.fill: parent
+                    anchors.margins: Style.space(4)
+                    spacing: Style.space(6)
+
+                    Text { textFormat: Text.PlainText; text: "New Path:"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+
+                    TextInput {
+                      id: defaultPathInput
+                      Layout.fillWidth: true
+                      text: panelRoot.customPathInputText
+                      color: panelRoot.foreground
+                      font.family: panelRoot.fontFamily
+                      font.pixelSize: Style.font.caption
+                      selectByMouse: true
+                      clip: true
+                      onTextChanged: panelRoot.customPathInputText = defaultPathInput.text.trim()
+                      onAccepted: {
+                        if (panelRoot.customPathInputText) {
+                          panelRoot.sendQbAction("set_global_save_path", panelRoot.customPathInputText)
+                          panelRoot.showSavePathEdit = false
+                        }
+                      }
+                    }
+
+                    PanelActionButton {
+                      iconText: ""
+                      tooltipText: "Save Default Path"
+                      foreground: Color.accent
+                      onClicked: {
+                        if (panelRoot.customPathInputText) {
+                          panelRoot.sendQbAction("set_global_save_path", panelRoot.customPathInputText)
+                          panelRoot.showSavePathEdit = false
+                        }
+                      }
+                    }
+
+                    PanelActionButton {
+                      iconText: "✕"
+                      tooltipText: "Cancel"
+                      onClicked: panelRoot.showSavePathEdit = false
+                    }
+                  }
+                }
+
+                // Expandable Section B: Global Speed Limit Menu
+                BorderSurface {
+                  visible: panelRoot.showGlobalLimitsMenu
+                  width: parent.width
+                  implicitHeight: globalLimitsCol.implicitHeight + Style.space(12)
+                  radius: Style.cornerRadius
+                  color: Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground)
+                  borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                  Column {
+                    id: globalLimitsCol
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.top: parent.top
+                    anchors.margins: Style.space(6)
+                    spacing: Style.space(6)
+
+                    // Global Download Limit Row
+                    RowLayout {
+                      width: parent.width
+                      spacing: Style.space(6)
+
+                      Text { textFormat: Text.PlainText; text: "󰜮 Global DL Limit:"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Item { Layout.fillWidth: true }
+
+                      Flow {
+                        spacing: Style.space(4)
+                        Repeater {
+                          model: panelRoot.globalSpeedPresets
+                          delegate: BorderSurface {
+                            readonly property bool isSelected: (panelRoot.qbGlobal.dl_limit || 0).toString() === modelData.val
+                            implicitWidth: dlPresetText.implicitWidth + Style.space(8)
+                            implicitHeight: Style.space(22)
+                            radius: Style.cornerRadius
+                            color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                            borderSpec: isSelected
+                              ? Border.controlSpec("selected", Color.accent, Color.accent)
+                              : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                            Text {
+                              id: dlPresetText
+                              textFormat: Text.PlainText
+                              anchors.centerIn: parent
+                              text: modelData.label
+                              color: isSelected ? Color.accent : panelRoot.foreground
+                              font.family: panelRoot.fontFamily
+                              font.pixelSize: Style.font.caption
+                              font.bold: isSelected
+                            }
+
+                            MouseArea {
+                              anchors.fill: parent
+                              cursorShape: Qt.PointingHandCursor
+                              onClicked: panelRoot.sendQbAction("set_global_dl_limit", modelData.val)
+                            }
+                          }
+                        }
+                      }
+                    }
+
+                    // Global Upload Limit Row
+                    RowLayout {
+                      width: parent.width
+                      spacing: Style.space(6)
+
+                      Text { textFormat: Text.PlainText; text: "󰜵 Global UP Limit:"; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Item { Layout.fillWidth: true }
+
+                      Flow {
+                        spacing: Style.space(4)
+                        Repeater {
+                          model: panelRoot.globalUpPresets
+                          delegate: BorderSurface {
+                            readonly property bool isSelected: (panelRoot.qbGlobal.up_limit || 0).toString() === modelData.val
+                            implicitWidth: upPresetText.implicitWidth + Style.space(8)
+                            implicitHeight: Style.space(22)
+                            radius: Style.cornerRadius
+                            color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                            borderSpec: isSelected
+                              ? Border.controlSpec("selected", Color.accent, Color.accent)
+                              : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                            Text {
+                              id: upPresetText
+                              textFormat: Text.PlainText
+                              anchors.centerIn: parent
+                              text: modelData.label
+                              color: isSelected ? Color.accent : panelRoot.foreground
+                              font.family: panelRoot.fontFamily
+                              font.pixelSize: Style.font.caption
+                              font.bold: isSelected
+                            }
+
+                            MouseArea {
+                              anchors.fill: parent
+                              cursorShape: Qt.PointingHandCursor
+                              onClicked: panelRoot.sendQbAction("set_global_up_limit", modelData.val)
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
                 }
               }
             }
@@ -1083,7 +1377,9 @@ Panel {
                   implicitHeight: qbItemCol.implicitHeight + Style.space(12)
                   radius: Style.cornerRadius
                   color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
-                  borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
+                  borderSpec: (panelRoot.expandedTorrentHash === modelData.hash)
+                    ? Border.controlSpec("selected", Color.accent, Color.accent)
+                    : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
                   Column {
                     id: qbItemCol
@@ -1091,9 +1387,9 @@ Panel {
                     anchors.right: parent.right
                     anchors.top: parent.top
                     anchors.margins: Style.space(8)
-                    spacing: Style.space(4)
+                    spacing: Style.space(5)
 
-                    // Row 1: State Badge, Progress %, and Control Buttons
+                    // Row 1: State Badge, Progress %, Ratio, Limits, and Action Buttons
                     RowLayout {
                       width: parent.width
                       spacing: Style.space(6)
@@ -1126,16 +1422,57 @@ Panel {
                         font.bold: true
                       }
 
+                      // Ratio
+                      Text {
+                        textFormat: Text.PlainText
+                        text: "Ratio: " + modelData.ratio
+                        color: panelRoot.dim
+                        font.family: panelRoot.fontFamily
+                        font.pixelSize: Style.font.caption
+                      }
+
+                      // DL Limit badge if active
+                      BorderSurface {
+                        visible: modelData.dl_limit > 0
+                        implicitWidth: dlLimBadgeText.implicitWidth + Style.space(6)
+                        implicitHeight: dlLimBadgeText.implicitHeight + Style.space(2)
+                        radius: Style.cornerRadius
+                        color: "transparent"
+                        borderSpec: Border.controlSpec("normal", "#87c095", Color.accent)
+                        Text {
+                          id: dlLimBadgeText
+                          textFormat: Text.PlainText
+                          anchors.centerIn: parent
+                          text: "󰜮 " + modelData.dl_limit_str
+                          color: "#87c095"
+                          font.family: panelRoot.fontFamily
+                          font.pixelSize: Style.font.caption
+                        }
+                      }
+
                       Item { Layout.fillWidth: true }
 
                       // Pause / Resume Button
                       PanelActionButton {
-                        iconText: modelData.state.indexOf("paused") !== -1 ? "󰐊" : "󰏤"
-                        tooltipText: modelData.state.indexOf("paused") !== -1 ? "Resume Torrent" : "Pause Torrent"
+                        iconText: modelData.state.indexOf("paused") !== -1 || modelData.state.indexOf("stopped") !== -1 ? "󰐊" : "󰏤"
+                        tooltipText: modelData.state.indexOf("paused") !== -1 || modelData.state.indexOf("stopped") !== -1 ? "Resume Torrent" : "Pause Torrent"
                         foreground: Color.accent
                         onClicked: {
-                          if (modelData.state.indexOf("paused") !== -1) panelRoot.sendQbAction("resume", modelData.hash)
-                          else panelRoot.sendQbAction("pause", modelData.hash)
+                          if (modelData.state.indexOf("paused") !== -1 || modelData.state.indexOf("stopped") !== -1) {
+                            panelRoot.sendQbAction("resume", modelData.hash)
+                          } else {
+                            panelRoot.sendQbAction("pause", modelData.hash)
+                          }
+                        }
+                      }
+
+                      // Detailed Limiter & Path Settings Button
+                      PanelActionButton {
+                        iconText: ""
+                        tooltipText: panelRoot.expandedTorrentHash === modelData.hash ? "Close Torrent Controls" : "Speed Limits & Torrent Settings"
+                        foreground: panelRoot.expandedTorrentHash === modelData.hash ? Color.accent : panelRoot.foreground
+                        onClicked: {
+                          panelRoot.expandedTorrentHash = (panelRoot.expandedTorrentHash === modelData.hash) ? "" : modelData.hash
                         }
                       }
 
@@ -1144,7 +1481,7 @@ Panel {
                         iconText: "󰆴"
                         tooltipText: "Remove from qBittorrent"
                         foreground: panelRoot.urgent
-                        onClicked: panelRoot.sendQbAction("delete", modelData.hash)
+                        onClicked: panelRoot.sendQbAction("delete", modelData.hash, "0")
                       }
                     }
 
@@ -1208,6 +1545,242 @@ Panel {
                         color: panelRoot.dim
                         font.family: panelRoot.fontFamily
                         font.pixelSize: Style.font.caption
+                      }
+                    }
+
+                    // =========================================================
+                    // ROW 5: EXPANDABLE PER-TORRENT CONTROLLER & LIMITER DRAWER
+                    // =========================================================
+                    Column {
+                      visible: panelRoot.expandedTorrentHash === modelData.hash
+                      width: parent.width
+                      spacing: Style.space(6)
+
+                      PanelSeparator { width: parent.width }
+
+                      // Location & Open Folder Row
+                      RowLayout {
+                        width: parent.width
+                        spacing: Style.space(6)
+
+                        Text { textFormat: Text.PlainText; text: "󰉋 Path:"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                        Text {
+                          textFormat: Text.PlainText
+                          Layout.fillWidth: true
+                          text: modelData.save_path
+                          color: panelRoot.foreground
+                          font.family: panelRoot.fontFamily
+                          font.pixelSize: Style.font.caption
+                          elide: Text.ElideMiddle
+                        }
+
+                        BorderSurface {
+                          implicitWidth: openFolderText.implicitWidth + Style.space(8)
+                          implicitHeight: Style.space(22)
+                          radius: Style.cornerRadius
+                          color: "transparent"
+                          borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                          Text {
+                            id: openFolderText
+                            textFormat: Text.PlainText
+                            anchors.centerIn: parent
+                            text: "Open Folder"
+                            color: Color.accent
+                            font.family: panelRoot.fontFamily
+                            font.pixelSize: Style.font.caption
+                          }
+
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: Quickshell.execDetached(["xdg-open", modelData.save_path])
+                          }
+                        }
+                      }
+
+                      // Per-Torrent Download Speed Limit Selector
+                      RowLayout {
+                        width: parent.width
+                        spacing: Style.space(4)
+
+                        Text { textFormat: Text.PlainText; text: "󰜮 DL Limit:"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                        Item { Layout.fillWidth: true }
+
+                        Flow {
+                          spacing: Style.space(3)
+                          Repeater {
+                            model: [
+                              { label: "∞", val: "0" },
+                              { label: "1M", val: "1048576" },
+                              { label: "5M", val: "5242880" },
+                              { label: "10M", val: "10485760" },
+                              { label: "25M", val: "26214400" }
+                            ]
+                            delegate: BorderSurface {
+                              readonly property bool isSelected: (modelData.dl_limit || 0).toString() === modelData.val
+                              implicitWidth: tDlText.implicitWidth + Style.space(8)
+                              implicitHeight: Style.space(20)
+                              radius: Style.cornerRadius
+                              color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                              borderSpec: isSelected
+                                ? Border.controlSpec("selected", "#87c095", Color.accent)
+                                : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                              Text {
+                                id: tDlText
+                                textFormat: Text.PlainText
+                                anchors.centerIn: parent
+                                text: modelData.label
+                                color: isSelected ? "#87c095" : panelRoot.foreground
+                                font.family: panelRoot.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: isSelected
+                              }
+
+                              MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: panelRoot.sendQbAction("set_torrent_dl_limit", modelData.hash, modelData.val)
+                              }
+                            }
+                          }
+                        }
+                      }
+
+                      // Per-Torrent Upload Speed Limit Selector
+                      RowLayout {
+                        width: parent.width
+                        spacing: Style.space(4)
+
+                        Text { textFormat: Text.PlainText; text: "󰜵 UP Limit:"; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                        Item { Layout.fillWidth: true }
+
+                        Flow {
+                          spacing: Style.space(3)
+                          Repeater {
+                            model: [
+                              { label: "∞", val: "0" },
+                              { label: "250K", val: "256000" },
+                              { label: "500K", val: "512000" },
+                              { label: "1M", val: "1048576" },
+                              { label: "5M", val: "5242880" }
+                            ]
+                            delegate: BorderSurface {
+                              readonly property bool isSelected: (modelData.up_limit || 0).toString() === modelData.val
+                              implicitWidth: tUpText.implicitWidth + Style.space(8)
+                              implicitHeight: Style.space(20)
+                              radius: Style.cornerRadius
+                              color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                              borderSpec: isSelected
+                                ? Border.controlSpec("selected", "#6aa6b2", Color.accent)
+                                : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                              Text {
+                                id: tUpText
+                                textFormat: Text.PlainText
+                                anchors.centerIn: parent
+                                text: modelData.label
+                                color: isSelected ? "#6aa6b2" : panelRoot.foreground
+                                font.family: panelRoot.fontFamily
+                                font.pixelSize: Style.font.caption
+                                font.bold: isSelected
+                              }
+
+                              MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: panelRoot.sendQbAction("set_torrent_up_limit", modelData.hash, modelData.val)
+                              }
+                            }
+                          }
+                        }
+                      }
+
+                      // Quick Action Buttons (Force, Recheck, Delete Options)
+                      RowLayout {
+                        width: parent.width
+                        spacing: Style.space(6)
+
+                        // Force Start Toggle
+                        BorderSurface {
+                          implicitWidth: forceBtnText.implicitWidth + Style.space(8)
+                          implicitHeight: Style.space(24)
+                          radius: Style.cornerRadius
+                          color: modelData.forced ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+                          borderSpec: modelData.forced
+                            ? Border.controlSpec("selected", Color.accent, Color.accent)
+                            : Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                          Text {
+                            id: forceBtnText
+                            textFormat: Text.PlainText
+                            anchors.centerIn: parent
+                            text: modelData.forced ? "󰐊 Forced: ON" : "󰐊 Force Start"
+                            color: modelData.forced ? Color.accent : panelRoot.foreground
+                            font.family: panelRoot.fontFamily
+                            font.pixelSize: Style.font.caption
+                            font.bold: modelData.forced
+                          }
+
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: panelRoot.sendQbAction("toggle_force", modelData.hash, !modelData.forced)
+                          }
+                        }
+
+                        // Recheck
+                        BorderSurface {
+                          implicitWidth: recheckBtnText.implicitWidth + Style.space(8)
+                          implicitHeight: Style.space(24)
+                          radius: Style.cornerRadius
+                          color: "transparent"
+                          borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
+
+                          Text {
+                            id: recheckBtnText
+                            textFormat: Text.PlainText
+                            anchors.centerIn: parent
+                            text: " Recheck"
+                            color: panelRoot.foreground
+                            font.family: panelRoot.fontFamily
+                            font.pixelSize: Style.font.caption
+                          }
+
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: panelRoot.sendQbAction("recheck", modelData.hash)
+                          }
+                        }
+
+                        Item { Layout.fillWidth: true }
+
+                        // Delete with Files
+                        BorderSurface {
+                          implicitWidth: delFilesText.implicitWidth + Style.space(8)
+                          implicitHeight: Style.space(24)
+                          radius: Style.cornerRadius
+                          color: "transparent"
+                          borderSpec: Border.controlSpec("normal", panelRoot.urgent, Color.accent)
+
+                          Text {
+                            id: delFilesText
+                            textFormat: Text.PlainText
+                            anchors.centerIn: parent
+                            text: "󰆴 Delete with Files"
+                            color: panelRoot.urgent
+                            font.family: panelRoot.fontFamily
+                            font.pixelSize: Style.font.caption
+                          }
+
+                          MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: panelRoot.sendQbAction("delete", modelData.hash, "1")
+                          }
+                        }
                       }
                     }
                   }
