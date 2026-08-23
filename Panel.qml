@@ -7,7 +7,7 @@ import qs.Commons
 import qs.Ui
 
 Panel {
-  id: root
+  id: panelRoot
 
   moduleName: "ucmz851.omatorrent"
   ipcTarget: "ucmz851.omatorrent"
@@ -79,24 +79,24 @@ Panel {
 
   function clearSearch() {
     if (searchInput) searchInput.text = ""
-    root.searchQuery = ""
-    root.lastQuery = ""
-    root.searchResults = []
-    root.noticeMessage = ""
-    root.isSearching = false
-    root.providerDropdownOpen = false
-    root.sortDropdownOpen = false
+    panelRoot.searchQuery = ""
+    panelRoot.lastQuery = ""
+    panelRoot.searchResults = []
+    panelRoot.noticeMessage = ""
+    panelRoot.isSearching = false
+    panelRoot.providerDropdownOpen = false
+    panelRoot.sortDropdownOpen = false
     if (searchInput) searchInput.forceActiveFocus()
   }
 
   function triggerSearch() {
-    root.providerDropdownOpen = false
-    root.sortDropdownOpen = false
+    panelRoot.providerDropdownOpen = false
+    panelRoot.sortDropdownOpen = false
     var q = searchInput.text ? searchInput.text.trim() : ""
     if (!q) return
-    root.lastQuery = q
-    root.isSearching = true
-    root.noticeMessage = ""
+    panelRoot.lastQuery = q
+    panelRoot.isSearching = true
+    panelRoot.noticeMessage = ""
 
     var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
     searchProc.command = [
@@ -105,20 +105,20 @@ Panel {
       "--query",
       q,
       "--category",
-      root.activeCategory,
+      panelRoot.activeCategory,
       "--provider",
-      root.activeProvider,
+      panelRoot.activeProvider,
       "--sort",
-      root.activeSort
+      panelRoot.activeSort
     ]
     searchProc.running = true
   }
 
   function pollQBittorrent(customPort) {
     if (qbPollProc.running) return
-    root.isPollingQb = true
+    panelRoot.isPollingQb = true
     var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
-    var p = (customPort && customPort !== "auto") ? customPort : root.qbPortStr
+    var p = (customPort && customPort !== "auto") ? customPort : panelRoot.qbPortStr
     if (customPort === "auto") p = "0"
     qbPollProc.command = ["python3", scriptPath, "--qbittorrent", (p || "8080")]
     qbPollProc.running = true
@@ -126,7 +126,7 @@ Panel {
 
   function sendQbAction(action, targetHash) {
     var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
-    var p = root.qbPortStr || "8080"
+    var p = panelRoot.qbPortStr || "8080"
     qbActionProc.command = ["python3", scriptPath, "--qb-action", action, targetHash, p]
     qbActionProc.running = true
   }
@@ -134,18 +134,18 @@ Panel {
   function copyMagnet(magnetLink, title) {
     if (!magnetLink) return
     Quickshell.execDetached(["wl-copy", "--", magnetLink])
-    root.noticeMessage = "Copied magnet link for: " + (title || "Torrent")
+    panelRoot.noticeMessage = "Copied magnet link for: " + (title || "Torrent")
     noticeTimer.restart()
   }
 
   function launchTorrent(magnetLink, title) {
     if (!magnetLink) return
-    if (root.qbConnected) {
-      root.sendQbAction("add", magnetLink)
-      root.noticeMessage = "Added directly to qBittorrent: " + (title || "Torrent")
+    if (panelRoot.qbConnected) {
+      panelRoot.sendQbAction("add", magnetLink)
+      panelRoot.noticeMessage = "Added directly to qBittorrent: " + (title || "Torrent")
     } else {
       Quickshell.execDetached(["xdg-open", magnetLink])
-      root.noticeMessage = "Dispatched magnet to desktop client: " + (title || "Torrent")
+      panelRoot.noticeMessage = "Dispatched magnet to desktop client: " + (title || "Torrent")
     }
     noticeTimer.restart()
   }
@@ -166,10 +166,10 @@ Panel {
     switch (stateLabel) {
       case "Downloading": return "#87c095"
       case "Seeding": return "#6aa6b2"
-      case "Paused": return root.dim
+      case "Paused": return panelRoot.dim
       case "Completed": return Color.accent
-      case "Error": return root.urgent
-      default: return root.foreground
+      case "Error": return panelRoot.urgent
+      default: return panelRoot.foreground
     }
   }
 
@@ -178,15 +178,15 @@ Panel {
     interval: 3500
     running: false
     repeat: false
-    onTriggered: root.noticeMessage = ""
+    onTriggered: panelRoot.noticeMessage = ""
   }
 
   Timer {
     id: qbAutoTimer
     interval: 2500
-    running: root.opened
+    running: panelRoot.opened
     repeat: true
-    onTriggered: root.pollQBittorrent()
+    onTriggered: panelRoot.pollQBittorrent()
   }
 
   Process {
@@ -194,12 +194,12 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.isSearching = false
+        panelRoot.isSearching = false
         if (!text || text.trim() === "") return
         try {
           var data = JSON.parse(text)
-          root.searchResults = data.results || []
-          root.searchDurationMs = data.time_ms || 0
+          panelRoot.searchResults = data.results || []
+          panelRoot.searchDurationMs = data.time_ms || 0
         } catch (e) {
           console.log("OmaTorrent parse error:", e)
         }
@@ -213,7 +213,7 @@ Panel {
         }
       }
     }
-    onExited: function(c) { root.isSearching = false }
+    onExited: function(c) { panelRoot.isSearching = false }
   }
 
   Process {
@@ -221,21 +221,21 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.isPollingQb = false
+        panelRoot.isPollingQb = false
         if (!text || text.trim() === "") return
         try {
           var data = JSON.parse(text)
-          root.qbConnected = (data.status === "connected")
-          root.qbVersion = data.version || ""
-          if (data.port) root.qbPortStr = data.port.toString()
-          root.qbGlobal = data.global || ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0 })
-          root.qbTorrents = data.torrents || []
+          panelRoot.qbConnected = (data.status === "connected")
+          panelRoot.qbVersion = data.version || ""
+          if (data.port) panelRoot.qbPortStr = data.port.toString()
+          panelRoot.qbGlobal = data.global || ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0 })
+          panelRoot.qbTorrents = data.torrents || []
         } catch (e) {
           console.log("qBittorrent parse error:", e)
         }
       }
     }
-    onExited: function(c) { root.isPollingQb = false }
+    onExited: function(c) { panelRoot.isPollingQb = false }
   }
 
   Process {
@@ -243,17 +243,17 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        root.pollQBittorrent()
+        panelRoot.pollQBittorrent()
       }
     }
   }
 
   onOpenedChanged: {
     if (opened) {
-      root.providerDropdownOpen = false
-      root.sortDropdownOpen = false
-      root.pollQBittorrent()
-      if (root.activeViewTab === "search") {
+      panelRoot.providerDropdownOpen = false
+      panelRoot.sortDropdownOpen = false
+      panelRoot.pollQBittorrent()
+      if (panelRoot.activeViewTab === "search") {
         Qt.callLater(function() {
           if (searchInput) {
             searchInput.forceActiveFocus()
@@ -264,14 +264,14 @@ Panel {
     }
   }
 
-  Component.onCompleted: root.pollQBittorrent()
+  Component.onCompleted: panelRoot.pollQBittorrent()
 
   KeyboardPanel {
     id: panel
-    anchorItem: root.anchorItem
+    anchorItem: panelRoot.anchorItem
     owner: root
-    bar: root.bar
-    open: root.opened
+    bar: panelRoot.bar
+    open: panelRoot.opened
     focusTarget: searchInput
 
     contentWidth: panel.fittedContentWidth(Style.space(540))
@@ -282,16 +282,16 @@ Panel {
       anchors.fill: parent
 
       onCloseRequested: {
-        if (root.providerDropdownOpen || root.sortDropdownOpen) {
-          root.providerDropdownOpen = false
-          root.sortDropdownOpen = false
+        if (panelRoot.providerDropdownOpen || panelRoot.sortDropdownOpen) {
+          panelRoot.providerDropdownOpen = false
+          panelRoot.sortDropdownOpen = false
         } else if (searchInput && searchInput.text !== "") {
-          root.clearSearch()
+          panelRoot.clearSearch()
         } else {
-          root.close()
+          panelRoot.close()
         }
       }
-      onTabRequested: function(direction) { root.switchPanel(direction) }
+      onTabRequested: function(direction) { panelRoot.switchPanel(direction) }
 
       Column {
         id: mainColumn
@@ -312,7 +312,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             text: "󰚌"
             color: Color.accent
-            font.family: root.fontFamily
+            font.family: panelRoot.fontFamily
             font.pixelSize: Style.font.display
           }
 
@@ -330,8 +330,8 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: "OmaTorrent"
-                color: root.foreground
-                font.family: root.fontFamily
+                color: panelRoot.foreground
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.title
                 font.bold: true
               }
@@ -341,18 +341,18 @@ Panel {
                 implicitHeight: badgeText.implicitHeight + Style.space(4)
                 anchors.verticalCenter: parent.verticalCenter
                 color: "transparent"
-                borderSpec: Border.controlSpec("normal", root.qbConnected ? "#87c095" : root.dim, Color.accent)
+                borderSpec: Border.controlSpec("normal", panelRoot.qbConnected ? "#87c095" : panelRoot.dim, Color.accent)
                 radius: Style.cornerRadius
 
                 Text {
                   id: badgeText
                   textFormat: Text.PlainText
                   anchors.centerIn: parent
-                  text: root.qbConnected
-                    ? (root.qbGlobal.active_downloads > 0 ? (root.qbGlobal.active_downloads + " Downloading · " + root.qbGlobal.dl_speed_str) : "qBittorrent Connected")
-                    : (root.resultsCount > 0 ? (root.resultsCount + " Torrents · " + root.searchDurationMs + "ms") : "Multi-Indexer")
-                  color: root.qbConnected ? "#87c095" : Color.accent
-                  font.family: root.fontFamily
+                  text: panelRoot.qbConnected
+                    ? (panelRoot.qbGlobal.active_downloads > 0 ? (panelRoot.qbGlobal.active_downloads + " Downloading · " + panelRoot.qbGlobal.dl_speed_str) : "qBittorrent Connected")
+                    : (panelRoot.resultsCount > 0 ? (panelRoot.resultsCount + " Torrents · " + panelRoot.searchDurationMs + "ms") : "Multi-Indexer")
+                  color: panelRoot.qbConnected ? "#87c095" : Color.accent
+                  font.family: panelRoot.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
                 }
@@ -362,8 +362,8 @@ Panel {
             Text {
               textFormat: Text.PlainText
               text: "Search · Magnets · Live qBittorrent Transfers"
-              color: root.dim
-              font.family: root.fontFamily
+              color: panelRoot.dim
+              font.family: panelRoot.fontFamily
               font.pixelSize: Style.font.caption
             }
           }
@@ -374,7 +374,7 @@ Panel {
             anchors.verticalCenter: parent.verticalCenter
             iconText: "✕"
             tooltipText: "Close (Esc)"
-            onClicked: root.close()
+            onClicked: panelRoot.close()
           }
         }
 
@@ -385,14 +385,15 @@ Panel {
 
           // Tab 1: Search Engine
           BorderSurface {
-            readonly property bool isSelected: root.activeViewTab === "search"
+            id: searchTabSurface
+            readonly property bool isSelected: panelRoot.activeViewTab === "search"
             width: (parent.width - Style.space(6)) / 2
             implicitHeight: Style.space(32)
             radius: Style.cornerRadius
-            color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
-            borderSpec: isSelected
+            color: searchTabSurface.isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+            borderSpec: searchTabSurface.isSelected
               ? Border.controlSpec("selected", Color.accent, Color.accent)
-              : Border.controlSpec("normal", root.dim, Color.accent)
+              : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
             Row {
               anchors.centerIn: parent
@@ -401,14 +402,14 @@ Panel {
                 textFormat: Text.PlainText
                 text: ""
                 color: Color.accent
-                font.family: root.fontFamily
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.body
               }
               Text {
                 textFormat: Text.PlainText
                 text: "Search Indexers"
-                color: isSelected ? Color.accent : root.foreground
-                font.family: root.fontFamily
+                color: searchTabSurface.isSelected ? Color.accent : panelRoot.foreground
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: true
               }
@@ -418,7 +419,7 @@ Panel {
               anchors.fill: parent
               cursorShape: Qt.PointingHandCursor
               onClicked: {
-                root.activeViewTab = "search"
+                panelRoot.activeViewTab = "search"
                 if (searchInput) searchInput.forceActiveFocus()
               }
             }
@@ -426,14 +427,15 @@ Panel {
 
           // Tab 2: qBittorrent Transfers
           BorderSurface {
-            readonly property bool isSelected: root.activeViewTab === "transfers"
+            id: qbTabSurface
+            readonly property bool isSelected: panelRoot.activeViewTab === "transfers"
             width: (parent.width - Style.space(6)) / 2
             implicitHeight: Style.space(32)
             radius: Style.cornerRadius
-            color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
-            borderSpec: isSelected
+            color: qbTabSurface.isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
+            borderSpec: qbTabSurface.isSelected
               ? Border.controlSpec("selected", Color.accent, Color.accent)
-              : Border.controlSpec("normal", root.dim, Color.accent)
+              : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
             Row {
               anchors.centerIn: parent
@@ -441,17 +443,17 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: "󰚌"
-                color: root.qbConnected ? "#87c095" : Color.accent
-                font.family: root.fontFamily
+                color: panelRoot.qbConnected ? "#87c095" : Color.accent
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.body
               }
               Text {
                 textFormat: Text.PlainText
-                text: root.qbConnected && root.qbGlobal.active_downloads > 0
-                  ? "Transfers (" + root.qbGlobal.active_downloads + " 󰜮)"
+                text: panelRoot.qbConnected && panelRoot.qbGlobal.active_downloads > 0
+                  ? "Transfers (" + panelRoot.qbGlobal.active_downloads + " 󰜮)"
                   : "qBittorrent Transfers"
-                color: isSelected ? (root.qbConnected ? "#87c095" : Color.accent) : root.foreground
-                font.family: root.fontFamily
+                color: qbTabSurface.isSelected ? (panelRoot.qbConnected ? "#87c095" : Color.accent) : panelRoot.foreground
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.body
                 font.bold: true
               }
@@ -461,8 +463,8 @@ Panel {
               anchors.fill: parent
               cursorShape: Qt.PointingHandCursor
               onClicked: {
-                root.activeViewTab = "transfers"
-                root.pollQBittorrent()
+                panelRoot.activeViewTab = "transfers"
+                panelRoot.pollQBittorrent()
               }
             }
           }
@@ -470,7 +472,7 @@ Panel {
 
         // ------------------ NOTICE BANNER ------------------
         BorderSurface {
-          visible: root.noticeMessage !== ""
+          visible: panelRoot.noticeMessage !== ""
           width: parent.width
           implicitHeight: noticeText.implicitHeight + Style.space(8)
           color: "transparent"
@@ -481,9 +483,9 @@ Panel {
             id: noticeText
             textFormat: Text.PlainText
             anchors.centerIn: parent
-            text: root.noticeMessage
+            text: panelRoot.noticeMessage
             color: Color.accent
-            font.family: root.fontFamily
+            font.family: panelRoot.fontFamily
             font.pixelSize: Style.font.caption
             font.bold: true
             elide: Text.ElideMiddle
@@ -494,7 +496,7 @@ Panel {
         // VIEW 1: SEARCH & DISCOVERY
         // =========================================================================
         Column {
-          visible: root.activeViewTab === "search"
+          visible: panelRoot.activeViewTab === "search"
           width: parent.width
           spacing: Style.space(8)
 
@@ -503,10 +505,10 @@ Panel {
             width: parent.width
             implicitHeight: Style.space(38)
             radius: Style.cornerRadius
-            color: Style.hoverFillFor(root.foreground, root.foreground)
+            color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
             borderSpec: searchInput.activeFocus
               ? Border.controlSpec("selected", Color.accent, Color.accent)
-              : Border.controlSpec("normal", root.dim, Color.accent)
+              : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
             RowLayout {
               anchors.fill: parent
@@ -517,17 +519,17 @@ Panel {
               Text {
                 textFormat: Text.PlainText
                 text: ""
-                color: root.isSearching ? Color.accent : root.dim
-                font.family: root.fontFamily
+                color: panelRoot.isSearching ? Color.accent : panelRoot.dim
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.body
               }
 
               TextInput {
                 id: searchInput
                 Layout.fillWidth: true
-                text: root.searchQuery
-                color: root.foreground
-                font.family: root.fontFamily
+                text: panelRoot.searchQuery
+                color: panelRoot.foreground
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.body
                 selectByMouse: true
                 clip: true
@@ -536,35 +538,35 @@ Panel {
                   textFormat: Text.PlainText
                   anchors.fill: parent
                   text: "Search movies, shows, games, anime, ISOs..."
-                  color: root.subtle
-                  font.family: root.fontFamily
+                  color: panelRoot.subtle
+                  font.family: panelRoot.fontFamily
                   font.pixelSize: Style.font.body
                   visible: !searchInput.text && !searchInput.activeFocus
                 }
 
-                onAccepted: root.triggerSearch()
+                onAccepted: panelRoot.triggerSearch()
               }
 
               PanelActionButton {
-                visible: searchInput.text !== "" || root.resultsCount > 0
+                visible: searchInput.text !== "" || panelRoot.resultsCount > 0
                 iconText: "✕"
                 tooltipText: "Clear search"
-                onClicked: root.clearSearch()
+                onClicked: panelRoot.clearSearch()
               }
 
               PanelActionButton {
-                iconText: root.isSearching ? "" : "󰑕"
+                iconText: panelRoot.isSearching ? "" : "󰑕"
                 tooltipText: "Search (Enter)"
                 foreground: Color.accent
                 rotation: 0
-                onClicked: root.triggerSearch()
+                onClicked: panelRoot.triggerSearch()
 
                 RotationAnimation on rotation {
                   from: 0
                   to: 360
                   duration: 800
                   loops: Animation.Infinite
-                  running: root.isSearching
+                  running: panelRoot.isSearching
                 }
               }
             }
@@ -583,24 +585,24 @@ Panel {
               spacing: Style.space(5)
 
               Repeater {
-                model: root.categoryList
+                model: panelRoot.categoryList
                 delegate: BorderSurface {
-                  readonly property bool isSelected: root.activeCategory === modelData.id
+                  readonly property bool isSelected: panelRoot.activeCategory === modelData.id
                   implicitWidth: catText.implicitWidth + Style.space(12)
                   implicitHeight: Style.space(26)
                   radius: Style.cornerRadius
-                  color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
+                  color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
                   borderSpec: isSelected
                     ? Border.controlSpec("selected", Color.accent, Color.accent)
-                    : Border.controlSpec("normal", root.dim, Color.accent)
+                    : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
                   Text {
                     id: catText
                     textFormat: Text.PlainText
                     anchors.centerIn: parent
                     text: modelData.label
-                    color: isSelected ? Color.accent : root.foreground
-                    font.family: root.fontFamily
+                    color: isSelected ? Color.accent : panelRoot.foreground
+                    font.family: panelRoot.fontFamily
                     font.pixelSize: Style.font.caption
                     font.bold: isSelected
                   }
@@ -609,8 +611,8 @@ Panel {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                      root.activeCategory = modelData.id
-                      if (searchInput.text.trim()) root.triggerSearch()
+                      panelRoot.activeCategory = modelData.id
+                      if (searchInput.text.trim()) panelRoot.triggerSearch()
                     }
                   }
                 }
@@ -628,41 +630,41 @@ Panel {
               Layout.fillWidth: true
               implicitHeight: Style.space(28)
               radius: Style.cornerRadius
-              color: root.providerDropdownOpen ? Style.selectedFillFor(root.foreground, root.foreground) : Style.hoverFillFor(root.foreground, root.foreground)
-              borderSpec: root.providerDropdownOpen
+              color: panelRoot.providerDropdownOpen ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+              borderSpec: panelRoot.providerDropdownOpen
                 ? Border.controlSpec("selected", Color.accent, Color.accent)
-                : Border.controlSpec("normal", root.dim, Color.accent)
+                : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
               RowLayout {
                 anchors.fill: parent
                 anchors.margins: Style.space(6)
                 spacing: Style.space(6)
 
-                Text { textFormat: Text.PlainText; text: "󰚌"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                Text { textFormat: Text.PlainText; text: "󰚌"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                 Text {
                   textFormat: Text.PlainText
                   Layout.fillWidth: true
                   text: {
-                    for (var i = 0; i < root.providerList.length; i++) {
-                      if (root.providerList[i].id === root.activeProvider) return root.providerList[i].label
+                    for (var i = 0; i < panelRoot.providerList.length; i++) {
+                      if (panelRoot.providerList[i].id === panelRoot.activeProvider) return panelRoot.providerList[i].label
                     }
                     return "All Indexers"
                   }
-                  color: root.foreground
-                  font.family: root.fontFamily
+                  color: panelRoot.foreground
+                  font.family: panelRoot.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
                   elide: Text.ElideRight
                 }
-                Text { textFormat: Text.PlainText; text: root.providerDropdownOpen ? "▲" : "▼"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                Text { textFormat: Text.PlainText; text: panelRoot.providerDropdownOpen ? "▲" : "▼"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
               }
 
               MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  root.sortDropdownOpen = false
-                  root.providerDropdownOpen = !root.providerDropdownOpen
+                  panelRoot.sortDropdownOpen = false
+                  panelRoot.providerDropdownOpen = !panelRoot.providerDropdownOpen
                 }
               }
             }
@@ -672,41 +674,41 @@ Panel {
               Layout.fillWidth: true
               implicitHeight: Style.space(28)
               radius: Style.cornerRadius
-              color: root.sortDropdownOpen ? Style.selectedFillFor(root.foreground, root.foreground) : Style.hoverFillFor(root.foreground, root.foreground)
-              borderSpec: root.sortDropdownOpen
+              color: panelRoot.sortDropdownOpen ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+              borderSpec: panelRoot.sortDropdownOpen
                 ? Border.controlSpec("selected", Color.accent, Color.accent)
-                : Border.controlSpec("normal", root.dim, Color.accent)
+                : Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
               RowLayout {
                 anchors.fill: parent
                 anchors.margins: Style.space(6)
                 spacing: Style.space(6)
 
-                Text { textFormat: Text.PlainText; text: "󰒺"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                Text { textFormat: Text.PlainText; text: "󰒺"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                 Text {
                   textFormat: Text.PlainText
                   Layout.fillWidth: true
                   text: {
-                    for (var j = 0; j < root.sortList.length; j++) {
-                      if (root.sortList[j].id === root.activeSort) return root.sortList[j].label
+                    for (var j = 0; j < panelRoot.sortList.length; j++) {
+                      if (panelRoot.sortList[j].id === panelRoot.activeSort) return panelRoot.sortList[j].label
                     }
                     return "Most Seeds"
                   }
-                  color: root.foreground
-                  font.family: root.fontFamily
+                  color: panelRoot.foreground
+                  font.family: panelRoot.fontFamily
                   font.pixelSize: Style.font.caption
                   font.bold: true
                   elide: Text.ElideRight
                 }
-                Text { textFormat: Text.PlainText; text: root.sortDropdownOpen ? "▲" : "▼"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                Text { textFormat: Text.PlainText; text: panelRoot.sortDropdownOpen ? "▲" : "▼"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
               }
 
               MouseArea {
                 anchors.fill: parent
                 cursorShape: Qt.PointingHandCursor
                 onClicked: {
-                  root.providerDropdownOpen = false
-                  root.sortDropdownOpen = !root.sortDropdownOpen
+                  panelRoot.providerDropdownOpen = false
+                  panelRoot.sortDropdownOpen = !panelRoot.sortDropdownOpen
                 }
               }
             }
@@ -714,11 +716,11 @@ Panel {
 
           // Provider Dropdown Menu
           BorderSurface {
-            visible: root.providerDropdownOpen
+            visible: panelRoot.providerDropdownOpen
             width: parent.width
             implicitHeight: provListCol.implicitHeight + Style.space(8)
             radius: Style.cornerRadius
-            color: Style.hoverFillFor(root.foreground, root.foreground)
+            color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
             borderSpec: Border.controlSpec("focus", Color.accent, Color.accent)
 
             Column {
@@ -730,13 +732,13 @@ Panel {
               spacing: Style.space(2)
 
               Repeater {
-                model: root.providerList
+                model: panelRoot.providerList
                 delegate: BorderSurface {
-                  readonly property bool isSelected: root.activeProvider === modelData.id
+                  readonly property bool isSelected: panelRoot.activeProvider === modelData.id
                   width: parent.width
                   implicitHeight: Style.space(28)
                   radius: Style.cornerRadius
-                  color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
+                  color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
                   borderSpec: Border.controlSpec("normal", isSelected ? Color.accent : "transparent", Color.accent)
 
                   RowLayout {
@@ -745,18 +747,18 @@ Panel {
                     anchors.rightMargin: Style.space(8)
                     spacing: Style.space(8)
 
-                    Text { textFormat: Text.PlainText; text: isSelected ? "" : "  "; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
-                    Text { textFormat: Text.PlainText; text: modelData.label; color: isSelected ? Color.accent : root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: isSelected }
-                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; text: "· " + modelData.desc; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                    Text { textFormat: Text.PlainText; text: isSelected ? "" : "  "; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: modelData.label; color: isSelected ? Color.accent : panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: isSelected }
+                    Text { textFormat: Text.PlainText; Layout.fillWidth: true; text: "· " + modelData.desc; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
                   }
 
                   MouseArea {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                      root.activeProvider = modelData.id
-                      root.providerDropdownOpen = false
-                      if (searchInput.text.trim()) root.triggerSearch()
+                      panelRoot.activeProvider = modelData.id
+                      panelRoot.providerDropdownOpen = false
+                      if (searchInput.text.trim()) panelRoot.triggerSearch()
                     }
                   }
                 }
@@ -766,11 +768,11 @@ Panel {
 
           // Sort Dropdown Menu
           BorderSurface {
-            visible: root.sortDropdownOpen
+            visible: panelRoot.sortDropdownOpen
             width: parent.width
             implicitHeight: sortListCol.implicitHeight + Style.space(8)
             radius: Style.cornerRadius
-            color: Style.hoverFillFor(root.foreground, root.foreground)
+            color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
             borderSpec: Border.controlSpec("focus", Color.accent, Color.accent)
 
             Column {
@@ -782,13 +784,13 @@ Panel {
               spacing: Style.space(2)
 
               Repeater {
-                model: root.sortList
+                model: panelRoot.sortList
                 delegate: BorderSurface {
-                  readonly property bool isSelected: root.activeSort === modelData.id
+                  readonly property bool isSelected: panelRoot.activeSort === modelData.id
                   width: parent.width
                   implicitHeight: Style.space(28)
                   radius: Style.cornerRadius
-                  color: isSelected ? Style.selectedFillFor(root.foreground, root.foreground) : "transparent"
+                  color: isSelected ? Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground) : "transparent"
                   borderSpec: Border.controlSpec("normal", isSelected ? Color.accent : "transparent", Color.accent)
 
                   RowLayout {
@@ -797,8 +799,8 @@ Panel {
                     anchors.rightMargin: Style.space(8)
                     spacing: Style.space(8)
 
-                    Text { textFormat: Text.PlainText; text: isSelected ? "" : "  "; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
-                    Text { textFormat: Text.PlainText; text: modelData.icon + "  " + modelData.label; color: isSelected ? Color.accent : root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: isSelected }
+                    Text { textFormat: Text.PlainText; text: isSelected ? "" : "  "; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: modelData.icon + "  " + modelData.label; color: isSelected ? Color.accent : panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: isSelected }
                     Item { Layout.fillWidth: true }
                   }
 
@@ -806,9 +808,9 @@ Panel {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                      root.activeSort = modelData.id
-                      root.sortDropdownOpen = false
-                      if (searchInput.text.trim()) root.triggerSearch()
+                      panelRoot.activeSort = modelData.id
+                      panelRoot.sortDropdownOpen = false
+                      if (searchInput.text.trim()) panelRoot.triggerSearch()
                     }
                   }
                 }
@@ -825,7 +827,7 @@ Panel {
 
             // State 1: Searching Spinner
             Column {
-              visible: root.isSearching && root.resultsCount === 0
+              visible: panelRoot.isSearching && panelRoot.resultsCount === 0
               anchors.centerIn: parent
               spacing: Style.space(8)
 
@@ -834,7 +836,7 @@ Panel {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: ""
                 color: Color.accent
-                font.family: root.fontFamily
+                font.family: panelRoot.fontFamily
                 font.pixelSize: Style.font.display
                 rotation: 0
 
@@ -843,52 +845,52 @@ Panel {
                   to: 360
                   duration: 800
                   loops: Animation.Infinite
-                  running: root.isSearching
+                  running: panelRoot.isSearching
                 }
               }
 
-              Text { textFormat: Text.PlainText; text: "Querying multi-indexers..."; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.body }
+              Text { textFormat: Text.PlainText; text: "Querying multi-indexers..."; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.body }
             }
 
             // State 2: Welcome Prompt
             Column {
-              visible: !root.isSearching && root.resultsCount === 0 && !root.lastQuery
+              visible: !panelRoot.isSearching && panelRoot.resultsCount === 0 && !panelRoot.lastQuery
               anchors.centerIn: parent
               spacing: Style.space(8)
               width: parent.width * 0.85
 
-              Text { textFormat: Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; text: "󰚌"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.display }
-              Text { textFormat: Text.PlainText; text: "Instant Torrent Search & Magnet Dispatcher"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; font.bold: true; horizontalAlignment: Text.AlignHCenter; width: parent.width }
-              Text { textFormat: Text.PlainText; text: "Type a title above to search across ThePirateBay, LimeTorrents, YTS, EZTV, FitGirl, and Nyaa."; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; width: parent.width }
+              Text { textFormat: Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; text: "󰚌"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.display }
+              Text { textFormat: Text.PlainText; text: "Instant Torrent Search & Magnet Dispatcher"; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.body; font.bold: true; horizontalAlignment: Text.AlignHCenter; width: parent.width }
+              Text { textFormat: Text.PlainText; text: "Type a title above to search across ThePirateBay, LimeTorrents, YTS, EZTV, FitGirl, and Nyaa."; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; width: parent.width }
             }
 
             // State 3: No Results
             Column {
-              visible: !root.isSearching && root.resultsCount === 0 && root.lastQuery !== ""
+              visible: !panelRoot.isSearching && panelRoot.resultsCount === 0 && panelRoot.lastQuery !== ""
               anchors.centerIn: parent
               spacing: Style.space(6)
               width: parent.width * 0.85
 
-              Text { textFormat: Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; text: "󰛵"; color: root.urgent; font.family: root.fontFamily; font.pixelSize: Style.font.title }
-              Text { textFormat: Text.PlainText; text: "No torrents found for '" + root.lastQuery + "'"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; font.bold: true; horizontalAlignment: Text.AlignHCenter; width: parent.width }
-              Text { textFormat: Text.PlainText; text: "Try different keywords, switch to 'All' category, or select 'All Indexers'."; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; width: parent.width }
+              Text { textFormat: Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; text: "󰛵"; color: panelRoot.urgent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title }
+              Text { textFormat: Text.PlainText; text: "No torrents found for '" + panelRoot.lastQuery + "'"; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.body; font.bold: true; horizontalAlignment: Text.AlignHCenter; width: parent.width }
+              Text { textFormat: Text.PlainText; text: "Try different keywords, switch to 'All' category, or select 'All Indexers'."; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; width: parent.width }
             }
 
             // State 4: Results List
             ListView {
               id: resultListView
-              visible: root.resultsCount > 0
+              visible: panelRoot.resultsCount > 0
               anchors.fill: parent
               clip: true
               spacing: Style.space(6)
-              model: root.searchResults
+              model: panelRoot.searchResults
 
               delegate: BorderSurface {
                 width: resultListView.width
                 implicitHeight: itemCol.implicitHeight + Style.space(12)
                 radius: Style.cornerRadius
-                color: Style.hoverFillFor(root.foreground, root.foreground)
-                borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+                color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+                borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
                 Column {
                   id: itemCol
@@ -907,20 +909,20 @@ Panel {
                       implicitWidth: provBadge.implicitWidth + Style.space(8)
                       implicitHeight: provBadge.implicitHeight + Style.space(3)
                       color: "transparent"
-                      borderSpec: Border.controlSpec("normal", root.getProviderColor(modelData.provider_badge), Color.accent)
+                      borderSpec: Border.controlSpec("normal", panelRoot.getProviderColor(modelData.provider_badge), Color.accent)
                       radius: Style.cornerRadius
 
-                      Text { id: provBadge; textFormat: Text.PlainText; anchors.centerIn: parent; text: modelData.provider_badge; color: root.getProviderColor(modelData.provider_badge); font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Text { id: provBadge; textFormat: Text.PlainText; anchors.centerIn: parent; text: modelData.provider_badge; color: panelRoot.getProviderColor(modelData.provider_badge); font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                     }
 
                     BorderSurface {
                       implicitWidth: catBadge.implicitWidth + Style.space(8)
                       implicitHeight: catBadge.implicitHeight + Style.space(3)
                       color: "transparent"
-                      borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+                      borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
                       radius: Style.cornerRadius
 
-                      Text { id: catBadge; textFormat: Text.PlainText; anchors.centerIn: parent; text: modelData.category || "General"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { id: catBadge; textFormat: Text.PlainText; anchors.centerIn: parent; text: modelData.category || "General"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                     }
 
                     Item { Layout.fillWidth: true }
@@ -929,14 +931,14 @@ Panel {
                       iconText: "󰆏"
                       tooltipText: "Copy Magnet Link"
                       foreground: Color.accent
-                      onClicked: root.copyMagnet(modelData.magnet, modelData.title)
+                      onClicked: panelRoot.copyMagnet(modelData.magnet, modelData.title)
                     }
 
                     PanelActionButton {
-                      iconText: root.qbConnected ? "󰚌" : "󰣐"
-                      tooltipText: root.qbConnected ? "Add directly to qBittorrent" : "Launch in Default Torrent Client"
+                      iconText: panelRoot.qbConnected ? "󰚌" : "󰣐"
+                      tooltipText: panelRoot.qbConnected ? "Add directly to qBittorrent" : "Launch in Default Torrent Client"
                       foreground: "#87c095"
-                      onClicked: root.launchTorrent(modelData.magnet, modelData.title)
+                      onClicked: panelRoot.launchTorrent(modelData.magnet, modelData.title)
                     }
                   }
 
@@ -945,8 +947,8 @@ Panel {
                     textFormat: Text.PlainText
                     width: parent.width
                     text: modelData.title
-                    color: root.foreground
-                    font.family: root.fontFamily
+                    color: panelRoot.foreground
+                    font.family: panelRoot.fontFamily
                     font.pixelSize: Style.font.body
                     font.bold: true
                     wrapMode: Text.Wrap
@@ -961,25 +963,25 @@ Panel {
 
                     Row {
                       spacing: Style.space(3)
-                      Text { textFormat: Text.PlainText; text: "󰉉"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                      Text { textFormat: Text.PlainText; text: modelData.size; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Text { textFormat: Text.PlainText; text: "󰉉"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: modelData.size; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                     }
 
                     Row {
                       spacing: Style.space(3)
-                      Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                      Text { textFormat: Text.PlainText; text: modelData.seeds.toString(); color: "#87c095"; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: modelData.seeds.toString(); color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                     }
 
                     Row {
                       spacing: Style.space(3)
-                      Text { textFormat: Text.PlainText; text: "󰜵"; color: "#e06c75"; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                      Text { textFormat: Text.PlainText; text: modelData.leechers.toString(); color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: "󰜵"; color: "#e06c75"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: modelData.leechers.toString(); color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                     }
 
                     Item { Layout.fillWidth: true }
 
-                    Text { textFormat: Text.PlainText; text: modelData.date || ""; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: modelData.date || ""; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                   }
                 }
               }
@@ -991,13 +993,13 @@ Panel {
         // VIEW 2: QBITTORRENT LIVE TRANSFERS & CONTROLLER
         // =========================================================================
         Column {
-          visible: root.activeViewTab === "transfers"
+          visible: panelRoot.activeViewTab === "transfers"
           width: parent.width
           spacing: Style.space(8)
 
           // State A: Connected to qBittorrent
           Column {
-            visible: root.qbConnected
+            visible: panelRoot.qbConnected
             width: parent.width
             spacing: Style.space(8)
 
@@ -1005,8 +1007,8 @@ Panel {
             BorderSurface {
               width: parent.width
               implicitHeight: speedGrid.implicitHeight + Style.space(16)
-              color: Style.hoverFillFor(root.foreground, root.foreground)
-              borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+              color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+              borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
               radius: Style.cornerRadius
 
               RowLayout {
@@ -1023,10 +1025,10 @@ Panel {
                   spacing: Style.space(2)
                   Row {
                     spacing: Style.space(4)
-                    Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "Download Speed"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "Download Speed"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                   }
-                  Text { textFormat: Text.PlainText; text: root.qbGlobal.dl_speed_str; color: "#87c095"; font.family: root.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+                  Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.dl_speed_str; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
                 }
 
                 // Upload Stat
@@ -1035,10 +1037,10 @@ Panel {
                   spacing: Style.space(2)
                   Row {
                     spacing: Style.space(4)
-                    Text { textFormat: Text.PlainText; text: "󰜵"; color: "#6aa6b2"; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "Upload Speed"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "󰜵"; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "Upload Speed"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                   }
-                  Text { textFormat: Text.PlainText; text: root.qbGlobal.up_speed_str; color: "#6aa6b2"; font.family: root.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
+                  Text { textFormat: Text.PlainText; text: panelRoot.qbGlobal.up_speed_str; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title; font.bold: true }
                 }
 
                 // Refresh Action
@@ -1046,7 +1048,7 @@ Panel {
                   iconText: ""
                   tooltipText: "Refresh Transfers"
                   foreground: Color.accent
-                  onClicked: root.pollQBittorrent()
+                  onClicked: panelRoot.pollQBittorrent()
                 }
               }
             }
@@ -1058,30 +1060,30 @@ Panel {
 
               // Empty transfers state
               Column {
-                visible: root.qbTorrents.length === 0
+                visible: panelRoot.qbTorrents.length === 0
                 anchors.centerIn: parent
                 spacing: Style.space(6)
                 width: parent.width * 0.85
 
-                Text { textFormat: Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; text: "󰚌"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.display }
-                Text { textFormat: Text.PlainText; text: "No Active Torrents"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; font.bold: true; horizontalAlignment: Text.AlignHCenter; width: parent.width }
-                Text { textFormat: Text.PlainText; text: "Use the Search tab above to find movies, games, or shows and send them directly to qBittorrent."; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; width: parent.width }
+                Text { textFormat: Text.PlainText; anchors.horizontalCenter: parent.horizontalCenter; text: "󰚌"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.display }
+                Text { textFormat: Text.PlainText; text: "No Active Torrents"; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.body; font.bold: true; horizontalAlignment: Text.AlignHCenter; width: parent.width }
+                Text { textFormat: Text.PlainText; text: "Use the Search tab above to find movies, games, or shows and send them directly to qBittorrent."; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; horizontalAlignment: Text.AlignHCenter; wrapMode: Text.Wrap; width: parent.width }
               }
 
               ListView {
                 id: qbListView
-                visible: root.qbTorrents.length > 0
+                visible: panelRoot.qbTorrents.length > 0
                 anchors.fill: parent
                 clip: true
                 spacing: Style.space(6)
-                model: root.qbTorrents
+                model: panelRoot.qbTorrents
 
                 delegate: BorderSurface {
                   width: qbListView.width
                   implicitHeight: qbItemCol.implicitHeight + Style.space(12)
                   radius: Style.cornerRadius
-                  color: Style.hoverFillFor(root.foreground, root.foreground)
-                  borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+                  color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+                  borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
                   Column {
                     id: qbItemCol
@@ -1100,7 +1102,7 @@ Panel {
                         implicitWidth: qbStateBadge.implicitWidth + Style.space(8)
                         implicitHeight: qbStateBadge.implicitHeight + Style.space(3)
                         color: "transparent"
-                        borderSpec: Border.controlSpec("normal", root.getStateColor(modelData.state_label), Color.accent)
+                        borderSpec: Border.controlSpec("normal", panelRoot.getStateColor(modelData.state_label), Color.accent)
                         radius: Style.cornerRadius
 
                         Text {
@@ -1108,8 +1110,8 @@ Panel {
                           textFormat: Text.PlainText
                           anchors.centerIn: parent
                           text: modelData.state_label
-                          color: root.getStateColor(modelData.state_label)
-                          font.family: root.fontFamily
+                          color: panelRoot.getStateColor(modelData.state_label)
+                          font.family: panelRoot.fontFamily
                           font.pixelSize: Style.font.caption
                           font.bold: true
                         }
@@ -1118,8 +1120,8 @@ Panel {
                       Text {
                         textFormat: Text.PlainText
                         text: modelData.progress_pct + "%"
-                        color: modelData.progress >= 1.0 ? Color.accent : root.foreground
-                        font.family: root.fontFamily
+                        color: modelData.progress >= 1.0 ? Color.accent : panelRoot.foreground
+                        font.family: panelRoot.fontFamily
                         font.pixelSize: Style.font.caption
                         font.bold: true
                       }
@@ -1132,8 +1134,8 @@ Panel {
                         tooltipText: modelData.state.indexOf("paused") !== -1 ? "Resume Torrent" : "Pause Torrent"
                         foreground: Color.accent
                         onClicked: {
-                          if (modelData.state.indexOf("paused") !== -1) root.sendQbAction("resume", modelData.hash)
-                          else root.sendQbAction("pause", modelData.hash)
+                          if (modelData.state.indexOf("paused") !== -1) panelRoot.sendQbAction("resume", modelData.hash)
+                          else panelRoot.sendQbAction("pause", modelData.hash)
                         }
                       }
 
@@ -1141,8 +1143,8 @@ Panel {
                       PanelActionButton {
                         iconText: "󰆴"
                         tooltipText: "Remove from qBittorrent"
-                        foreground: root.urgent
-                        onClicked: root.sendQbAction("delete", modelData.hash)
+                        foreground: panelRoot.urgent
+                        onClicked: panelRoot.sendQbAction("delete", modelData.hash)
                       }
                     }
 
@@ -1151,8 +1153,8 @@ Panel {
                       textFormat: Text.PlainText
                       width: parent.width
                       text: modelData.name
-                      color: root.foreground
-                      font.family: root.fontFamily
+                      color: panelRoot.foreground
+                      font.family: panelRoot.fontFamily
                       font.pixelSize: Style.font.body
                       font.bold: true
                       wrapMode: Text.Wrap
@@ -1165,7 +1167,7 @@ Panel {
                       width: parent.width
                       height: Style.space(6)
                       radius: Style.cornerRadius
-                      color: Qt.darker(root.dim, 2.0)
+                      color: Qt.darker(panelRoot.dim, 2.0)
 
                       Rectangle {
                         width: parent.width * Math.min(1.0, Math.max(0.0, modelData.progress))
@@ -1182,20 +1184,20 @@ Panel {
 
                       Row {
                         spacing: Style.space(3)
-                        Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                        Text { textFormat: Text.PlainText; text: modelData.dlspeed_str; color: "#87c095"; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                        Text { textFormat: Text.PlainText; text: "󰜮"; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                        Text { textFormat: Text.PlainText; text: modelData.dlspeed_str; color: "#87c095"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                       }
 
                       Row {
                         spacing: Style.space(3)
-                        Text { textFormat: Text.PlainText; text: "󰜵"; color: "#6aa6b2"; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                        Text { textFormat: Text.PlainText; text: modelData.upspeed_str; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                        Text { textFormat: Text.PlainText; text: "󰜵"; color: "#6aa6b2"; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                        Text { textFormat: Text.PlainText; text: modelData.upspeed_str; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                       }
 
                       Row {
                         spacing: Style.space(3)
-                        Text { textFormat: Text.PlainText; text: "󰉉"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                        Text { textFormat: Text.PlainText; text: modelData.completed_str + " / " + modelData.size_str; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                        Text { textFormat: Text.PlainText; text: "󰉉"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                        Text { textFormat: Text.PlainText; text: modelData.completed_str + " / " + modelData.size_str; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                       }
 
                       Item { Layout.fillWidth: true }
@@ -1203,8 +1205,8 @@ Panel {
                       Text {
                         textFormat: Text.PlainText
                         text: "ETA: " + modelData.eta_str
-                        color: root.dim
-                        font.family: root.fontFamily
+                        color: panelRoot.dim
+                        font.family: panelRoot.fontFamily
                         font.pixelSize: Style.font.caption
                       }
                     }
@@ -1216,15 +1218,15 @@ Panel {
 
           // State B: Disconnected / WebUI Not Configured
           Column {
-            visible: !root.qbConnected
+            visible: !panelRoot.qbConnected
             width: parent.width
             spacing: Style.space(10)
 
             BorderSurface {
               width: parent.width
               implicitHeight: setupCol.implicitHeight + Style.space(16)
-              color: Style.hoverFillFor(root.foreground, root.foreground)
-              borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+              color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+              borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
               radius: Style.cornerRadius
 
               Column {
@@ -1237,11 +1239,11 @@ Panel {
 
                 Row {
                   spacing: Style.space(8)
-                  Text { textFormat: Text.PlainText; text: "󰚌"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.title }
+                  Text { textFormat: Text.PlainText; text: "󰚌"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.title }
                   Column {
                     spacing: Style.space(1)
-                    Text { textFormat: Text.PlainText; text: "Enable qBittorrent Web UI"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.body; font.bold: true }
-                    Text { textFormat: Text.PlainText; text: "To view live download progress in OmaTorrent, enable Web UI:"; color: root.dim; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "Enable qBittorrent Web UI"; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.body; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: "To view live download progress in OmaTorrent, enable Web UI:"; color: panelRoot.dim; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                   }
                 }
 
@@ -1250,7 +1252,7 @@ Panel {
                   width: parent.width
                   implicitHeight: stepsCol.implicitHeight + Style.space(12)
                   color: "transparent"
-                  borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+                  borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
                   radius: Style.cornerRadius
 
                   Column {
@@ -1261,10 +1263,10 @@ Panel {
                     anchors.margins: Style.space(8)
                     spacing: Style.space(6)
 
-                    Text { textFormat: Text.PlainText; text: "1. Open qBittorrent on your desktop."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "2. Go to Tools ➔ Preferences (Alt+O) ➔ Web UI."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "3. Check 'Web User Interface (Remote control)'."; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                    Text { textFormat: Text.PlainText; text: "4. Check 'Bypass authentication for clients on localhost'."; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: "1. Open qBittorrent on your desktop."; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "2. Go to Tools ➔ Preferences (Alt+O) ➔ Web UI."; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "3. Check 'Web User Interface (Remote control)'."; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                    Text { textFormat: Text.PlainText; text: "4. Check 'Bypass authentication for clients on localhost'."; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                   }
                 }
 
@@ -1273,28 +1275,28 @@ Panel {
                   width: parent.width
                   implicitHeight: Style.space(34)
                   radius: Style.cornerRadius
-                  color: Style.hoverFillFor(root.foreground, root.foreground)
-                  borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+                  color: Style.hoverFillFor(panelRoot.foreground, panelRoot.foreground)
+                  borderSpec: Border.controlSpec("normal", panelRoot.dim, Color.accent)
 
                   RowLayout {
                     anchors.fill: parent
                     anchors.margins: Style.space(6)
                     spacing: Style.space(6)
 
-                    Text { textFormat: Text.PlainText; text: "Port:"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: "Port:"; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
 
                     TextInput {
                       id: portInputField
                       Layout.fillWidth: true
-                      text: root.qbPortStr
+                      text: panelRoot.qbPortStr
                       color: Color.accent
-                      font.family: root.fontFamily
+                      font.family: panelRoot.fontFamily
                       font.pixelSize: Style.font.caption
                       font.bold: true
                       selectByMouse: true
                       clip: true
-                      onTextChanged: root.qbPortStr = portInputField.text.trim()
-                      onAccepted: root.pollQBittorrent(portInputField.text.trim())
+                      onTextChanged: panelRoot.qbPortStr = portInputField.text.trim()
+                      onAccepted: panelRoot.pollQBittorrent(portInputField.text.trim())
                     }
 
                     BorderSurface {
@@ -1310,7 +1312,7 @@ Panel {
                         anchors.centerIn: parent
                         text: "Auto-Detect"
                         color: Color.accent
-                        font.family: root.fontFamily
+                        font.family: panelRoot.fontFamily
                         font.pixelSize: Style.font.caption
                         font.bold: true
                       }
@@ -1318,7 +1320,7 @@ Panel {
                       MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
-                        onClicked: root.pollQBittorrent("auto")
+                        onClicked: panelRoot.pollQBittorrent("auto")
                       }
                     }
                   }
@@ -1332,20 +1334,20 @@ Panel {
                     Layout.fillWidth: true
                     implicitHeight: Style.space(30)
                     radius: Style.cornerRadius
-                    color: Style.selectedFillFor(root.foreground, root.foreground)
+                    color: Style.selectedFillFor(panelRoot.foreground, panelRoot.foreground)
                     borderSpec: Border.controlSpec("selected", Color.accent, Color.accent)
 
                     Row {
                       anchors.centerIn: parent
                       spacing: Style.space(6)
-                      Text { textFormat: Text.PlainText; text: ""; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
-                      Text { textFormat: Text.PlainText; text: "Connect to Port " + (root.qbPortStr || "8080"); color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                      Text { textFormat: Text.PlainText; text: ""; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                      Text { textFormat: Text.PlainText; text: "Connect to Port " + (panelRoot.qbPortStr || "8080"); color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                     }
 
                     MouseArea {
                       anchors.fill: parent
                       cursorShape: Qt.PointingHandCursor
-                      onClicked: root.pollQBittorrent(root.qbPortStr)
+                      onClicked: panelRoot.pollQBittorrent(panelRoot.qbPortStr)
                     }
                   }
                 }
@@ -1358,11 +1360,11 @@ Panel {
         Text {
           textFormat: Text.PlainText
           width: parent.width
-          text: root.activeViewTab === "search"
+          text: panelRoot.activeViewTab === "search"
             ? "Click 󰚌 to send to qBittorrent · Click 󰆏 to copy magnet · Esc to close"
             : "Live qBittorrent Controller · Polling active transfers · Esc to close"
-          color: root.subtle
-          font.family: root.fontFamily
+          color: panelRoot.subtle
+          font.family: panelRoot.fontFamily
           font.pixelSize: Style.font.caption
           horizontalAlignment: Text.AlignHCenter
         }
