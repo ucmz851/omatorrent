@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "ucmz851.omatorrent",
+  "name": "OmaTorrent",
+  "version": "1.0.0",
+  "author": "ucmz851",
+  "license": "MIT",
+  "description": "High-speed multi-indexer torrent search engine and magnet dispatcher for Omarchy Quattro bar. Features 1-click magnet launch, provider filtering, and category filters.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "OmaTorrent",
+    "description": "Search torrents across ThePirateBay, LimeTorrents, YTS, EZTV, FitGirl, and Nyaa. Copy magnet links or dispatch to your torrent client with one click.",
+    "category": "Network",
+    "aliases": [
+      "torrent",
+      "torrents",
+      "magnet",
+      "download",
+      "p2p",
+      "pirate",
+      "piratebay",
+      "yts",
+      "eztv",
+      "limetorrents",
+      "fitgirl",
+      "nyaa",
+      "search"
+    ],
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
