@@ -65,6 +65,18 @@ Panel {
     { id: "date", label: "Newest Date", icon: "󰸗" }
   ]
 
+  function clearSearch() {
+    if (searchInput) searchInput.text = ""
+    root.searchQuery = ""
+    root.lastQuery = ""
+    root.searchResults = []
+    root.noticeMessage = ""
+    root.isSearching = false
+    root.providerDropdownOpen = false
+    root.sortDropdownOpen = false
+    if (searchInput) searchInput.forceActiveFocus()
+  }
+
   function triggerSearch() {
     root.providerDropdownOpen = false
     root.sortDropdownOpen = false
@@ -183,6 +195,8 @@ Panel {
         if (root.providerDropdownOpen || root.sortDropdownOpen) {
           root.providerDropdownOpen = false
           root.sortDropdownOpen = false
+        } else if (searchInput && searchInput.text !== "") {
+          root.clearSearch()
         } else {
           root.close()
         }
@@ -216,7 +230,7 @@ Panel {
             id: headerTextCol
             anchors.left: headerIcon.right
             anchors.leftMargin: Style.space(10)
-            anchors.right: closeBtn.left
+            anchors.right: headerActionRow.left
             anchors.rightMargin: Style.space(8)
             anchors.verticalCenter: parent.verticalCenter
             spacing: Style.space(1)
@@ -262,13 +276,42 @@ Panel {
             }
           }
 
-          PanelActionButton {
-            id: closeBtn
+          Row {
+            id: headerActionRow
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
-            iconText: "✕"
-            tooltipText: "Close (Esc)"
-            onClicked: root.close()
+            spacing: Style.space(4)
+
+            // New / Reset search button
+            BorderSurface {
+              visible: root.resultsCount > 0 || (searchInput && searchInput.text !== "")
+              implicitWidth: clearText.implicitWidth + Style.space(10)
+              implicitHeight: Style.space(26)
+              anchors.verticalCenter: parent.verticalCenter
+              radius: Style.cornerRadius
+              color: Style.hoverFillFor(root.foreground, root.foreground)
+              borderSpec: Border.controlSpec("normal", root.dim, Color.accent)
+
+              Row {
+                anchors.centerIn: parent
+                spacing: Style.space(4)
+                Text { textFormat: Text.PlainText; text: "󰅖"; color: Color.accent; font.family: root.fontFamily; font.pixelSize: Style.font.caption }
+                Text { id: clearText; textFormat: Text.PlainText; text: "New Search"; color: root.foreground; font.family: root.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+              }
+
+              MouseArea {
+                anchors.fill: parent
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.clearSearch()
+              }
+            }
+
+            PanelActionButton {
+              id: closeBtn
+              iconText: "✕"
+              tooltipText: "Close (Esc)"
+              onClicked: root.close()
+            }
           }
         }
 
@@ -341,14 +384,12 @@ Panel {
               onAccepted: root.triggerSearch()
             }
 
+            // Quick Clear button
             PanelActionButton {
-              visible: searchInput.text !== ""
+              visible: searchInput.text !== "" || root.resultsCount > 0
               iconText: "✕"
-              tooltipText: "Clear query"
-              onClicked: {
-                searchInput.text = ""
-                searchInput.forceActiveFocus()
-              }
+              tooltipText: "Clear search & start fresh"
+              onClicked: root.clearSearch()
             }
 
             PanelActionButton {
@@ -950,7 +991,7 @@ Panel {
         Text {
           textFormat: Text.PlainText
           width: parent.width
-          text: "Click 󰚌 to open in client · Click 󰆏 to copy magnet · Esc to close"
+          text: "Click 󰚌 to open in client · Click 󰆏 to copy magnet · Esc to clear / close"
           color: Qt.darker(root.dim, 1.3)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption
