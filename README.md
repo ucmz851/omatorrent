@@ -28,6 +28,26 @@ An ultra-fast, multi-source torrent search engine, filter aggregator, one-click 
 
 ---
 
+---
+
+## 🎯 Recommended Client: qBittorrent
+
+While OmaTorrent can dispatch magnet links to any desktop client (such as Transmission, Fragments, or Deluge) via `xdg-open`, **qBittorrent** is the **recommended BitTorrent client** to unlock the full potential of OmaTorrent.
+
+### Why qBittorrent?
+- **Full Dual-Tab Experience:** Enables the live **Transfers** dashboard directly inside the popout panel.
+- **Real-Time Telemetry:** Stream live download/upload speeds, ETAs, active seed/peer ratios, and DHT node counts.
+- **Bandwidth Throttling:** Switch on **Turtle Mode** (`󱥸 / 󰓅`) or set custom speed limits (global or per-torrent) on the fly.
+- **Directory Controls:** View, open, or reconfigure default download folders directly from the widget.
+- **Open-Source & Native:** Privacy-focused, lightweight, and native to Linux with zero adware.
+
+```sh
+# Install qBittorrent on Arch Linux / Omarchy
+sudo pacman -S qbittorrent
+```
+
+---
+
 ## 🚀 Quick Setup: Connecting qBittorrent (30 Seconds)
 
 OmaTorrent connects directly to your local qBittorrent desktop app via its Web UI API with zero external servers required.
