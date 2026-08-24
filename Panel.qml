@@ -220,9 +220,14 @@ Panel {
       onStreamFinished: {
         panelRoot.isSearching = false
         if (!text || text.trim() === "") return
+        // Enforce 2MB maximum byte ceiling on helper search output to prevent memory exhaustion
+        if (text.length > 2 * 1024 * 1024) {
+          console.log("OmaTorrent: search output exceeded 2MB byte ceiling")
+          return
+        }
         try {
           var data = JSON.parse(text)
-          panelRoot.searchResults = data.results || []
+          panelRoot.searchResults = (data.results || []).slice(0, 100)
           panelRoot.searchDurationMs = data.time_ms || 0
         } catch (e) {
           console.log("OmaTorrent parse error:", e)
@@ -233,7 +238,9 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         if (text && text.trim() !== "") {
-          console.log("OmaTorrent stderr:", text)
+          if (text.length <= 64 * 1024) {
+            console.log("OmaTorrent stderr:", text)
+          }
         }
       }
     }
@@ -247,6 +254,11 @@ Panel {
       onStreamFinished: {
         panelRoot.isPollingQb = false
         if (!text || text.trim() === "") return
+        // Enforce 5MB maximum byte ceiling on qBittorrent payload to prevent memory exhaustion
+        if (text.length > 5 * 1024 * 1024) {
+          console.log("OmaTorrent: qBittorrent output exceeded 5MB byte ceiling")
+          return
+        }
         try {
           var data = JSON.parse(text)
           panelRoot.qbConnected = (data.status === "connected")
@@ -267,6 +279,7 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        if (text && text.length > 256 * 1024) return
         panelRoot.pollQBittorrent()
       }
     }

@@ -22,6 +22,10 @@ HEADERS = {
     "Accept-Language": "en-US,en;q=0.5"
 }
 REQUEST_TIMEOUT = 4.0
+MAX_INDEXER_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB max per remote indexer query
+MAX_QBIT_RESPONSE_BYTES = 5 * 1024 * 1024     # 5 MB max for local qBittorrent WebUI payload
+MAX_CONF_FILE_BYTES = 64 * 1024               # 64 KB max for local config file read
+MAX_OUTPUT_SEARCH_RESULTS = 100               # Cap search results to prevent memory bloat
 
 DEFAULT_TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
@@ -33,6 +37,24 @@ DEFAULT_TRACKERS = [
     "udp://exodus.desync.com:6969/announce",
     "udp://open.demonii.com:1337/announce"
 ]
+
+def read_bounded(resp, max_bytes):
+    """
+    Read response stream with a strict upper byte ceiling to prevent memory exhaustion.
+    Raises ValueError if stream exceeds max_bytes.
+    """
+    chunk_size = 64 * 1024
+    chunks = []
+    total_bytes = 0
+    while True:
+        chunk = resp.read(chunk_size)
+        if not chunk:
+            break
+        total_bytes += len(chunk)
+        if total_bytes > max_bytes:
+            raise ValueError(f"Response payload exceeded maximum allowed limit of {max_bytes} bytes")
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 def make_magnet(info_hash, name, trackers=None):
     if not info_hash:
@@ -109,10 +131,10 @@ def parse_size_to_bytes(size_str):
     }
     return int(val * multipliers.get(unit, 1024**2))
 
-def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT):
+def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_bytes=MAX_INDEXER_RESPONSE_BYTES):
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        content = resp.read()
+        content = read_bounded(resp, max_bytes)
         if as_json:
             return json.loads(content.decode('utf-8', errors='ignore'))
         if as_xml:
@@ -126,9 +148,9 @@ def find_qbittorrent_port(preferred_port=8080):
     ports_to_try = [preferred_port] if preferred_port else []
     try:
         conf_path = os.path.expanduser('~/.config/qBittorrent/qBittorrent.conf')
-        if os.path.exists(conf_path):
+        if os.path.exists(conf_path) and os.path.getsize(conf_path) <= MAX_CONF_FILE_BYTES:
             with open(conf_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read()
+                text = f.read(MAX_CONF_FILE_BYTES)
             m = re.search(r'WebUI[\\/:]Port=(\d+)', text)
             if m:
                 p = int(m.group(1))
@@ -146,6 +168,7 @@ def find_qbittorrent_port(preferred_port=8080):
         try:
             req = urllib.request.Request(f"http://127.0.0.1:{p}/api/v2/app/version")
             with urllib.request.urlopen(req, timeout=0.35) as resp:
+                _ = read_bounded(resp, 1024)
                 return p
         except Exception:
             continue
@@ -157,7 +180,7 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
     try:
         ver_req = urllib.request.Request(f"{base_url}/app/version")
         with urllib.request.urlopen(ver_req, timeout=1.2) as resp:
-            version = resp.read().decode('utf-8').strip()
+            version = read_bounded(resp, 1024).decode('utf-8', errors='ignore').strip()
     except Exception:
         # Probe other ports if preferred port failed
         found_port = find_qbittorrent_port(actual_port)
@@ -167,7 +190,7 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
             try:
                 ver_req = urllib.request.Request(f"{base_url}/app/version")
                 with urllib.request.urlopen(ver_req, timeout=1.2) as resp:
-                    version = resp.read().decode('utf-8').strip()
+                    version = read_bounded(resp, 1024).decode('utf-8', errors='ignore').strip()
             except Exception as e:
                 return {
                     "status": "disconnected",
@@ -189,14 +212,14 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
         transfer_req = urllib.request.Request(f"{base_url}/transfer/info")
         global_info = {}
         with urllib.request.urlopen(transfer_req, timeout=1.2) as resp:
-            global_info = json.loads(resp.read().decode('utf-8'))
+            global_info = json.loads(read_bounded(resp, MAX_QBIT_RESPONSE_BYTES).decode('utf-8', errors='ignore'))
 
         # Fetch preferences for save_path, global limits, alt speed
         prefs = {}
         try:
             prefs_req = urllib.request.Request(f"{base_url}/app/preferences")
             with urllib.request.urlopen(prefs_req, timeout=1.2) as resp:
-                prefs = json.loads(resp.read().decode('utf-8'))
+                prefs = json.loads(read_bounded(resp, MAX_QBIT_RESPONSE_BYTES).decode('utf-8', errors='ignore'))
         except Exception:
             pass
 
@@ -205,14 +228,14 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
         try:
             mode_req = urllib.request.Request(f"{base_url}/transfer/speedLimitsMode")
             with urllib.request.urlopen(mode_req, timeout=1.0) as resp:
-                alt_mode = (resp.read().decode('utf-8').strip() == "1")
+                alt_mode = (read_bounded(resp, 1024).decode('utf-8', errors='ignore').strip() == "1")
         except Exception:
             pass
 
         torrents_req = urllib.request.Request(f"{base_url}/torrents/info?filter=all")
         torrents_raw = []
         with urllib.request.urlopen(torrents_req, timeout=1.5) as resp:
-            torrents_raw = json.loads(resp.read().decode('utf-8'))
+            torrents_raw = json.loads(read_bounded(resp, MAX_QBIT_RESPONSE_BYTES).decode('utf-8', errors='ignore'))
 
         torrents_list = []
         active_downloads = 0
@@ -398,6 +421,7 @@ def control_qbittorrent(action, target, extra=None, host="127.0.0.1", port=8080)
         try:
             req = urllib.request.Request(ep, data=encoded_data)
             with urllib.request.urlopen(req, timeout=2.5) as resp:
+                _ = read_bounded(resp, 64 * 1024)
                 return {"status": "success", "action": action, "target": target}
         except urllib.error.HTTPError as he:
             last_err = f"HTTP {he.code}: {he.reason}"
