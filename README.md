@@ -167,6 +167,15 @@ python3 scripts/torrent_engine.py --qbittorrent
 
 ---
 
+## ⚖️ Legal Disclaimer & Anti-Piracy Policy
+
+- **Metadata Aggregation Tool Only:** OmaTorrent is an open-source metadata search tool and local qBittorrent desktop controller. It does not host, store, upload, seed, index, or distribute any torrent files, video, audio, software, or copyrighted digital media.
+- **Third-Party Public Sources:** All search queries, names, seed counters, and magnet URIs are retrieved on-demand from public third-party indexers and RSS feeds. The developers have no ownership, influence, or control over third-party providers or their indexed content.
+- **No Copyright Ownership:** The developers do not claim any copyright, trademark, or ownership over materials indexed by external third-party search engines.
+- **User Responsibility:** Users are solely responsible for ensuring that all search queries and P2P transfers comply with applicable local laws, regulations, and intellectual property rights. The author and contributors disclaim all liability for any unauthorized distribution, downloading, or misuse of copyrighted materials.
+
+---
+
 ## 📜 License
 
 [MIT License](LICENSE) © 2026 Usama Imran Cheema ([@ucmz851](https://github.com/ucmz851)).

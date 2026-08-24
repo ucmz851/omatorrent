@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ucmz851",
   "license": "MIT",
-  "description": "High-speed multi-indexer torrent search engine and magnet dispatcher for Omarchy Quattro bar. Features 1-click magnet launch, provider filtering, and category filters.",
+  "description": "High-speed multi-indexer torrent search engine and real-time qBittorrent transfer controller for Omarchy Quattro bar. Features magnet launching, live download progress monitoring, and speed limiters.",
   "kinds": [
     "bar-widget"
   ],
