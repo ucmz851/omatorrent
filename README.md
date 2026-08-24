@@ -11,7 +11,9 @@ An ultra-fast, multi-source torrent search engine, filter aggregator, and one-cl
 ## Highlights
 
 - **⚡ Multi-Indexer Aggregation:** Simultaneously queries **ThePirateBay**, **LimeTorrents**, **YTS** (Movies), **EZTV** (TV Shows), **FitGirl Repacks** (Games), and **Nyaa** (Anime & Media) in parallel.
-- **🧲 One-Click Magnet Dispatch:** Click `󰣐` to instantly open any magnet URI directly in your preferred Linux desktop torrent client (`xdg-open` -> qBittorrent, Transmission, Fragments, Deluge, etc.).
+- **🧲 One-Click Magnet Dispatch:** Click `󰚌` to instantly inject into **qBittorrent** or open in your default Linux desktop torrent client (`xdg-open`).
+- **📊 Live qBittorrent Monitor:** Real-time transfer cards, live DL/UP speeds, ETA countdown, progress bars, and pause/resume/delete actions.
+- **⚙️ Advanced Speed & Path Limiters:** Configure global and per-torrent speed limits, turtle mode toggle, and customize default download folders directly in the panel.
 - **📋 Direct Wayland Clipboard:** Click `󰆏` to sanitize and copy clean magnet links to your clipboard via `wl-copy`.
 - **🏷️ Instant Categories:** Filter by **All**, **Movies**, **TV Shows**, **Games**, **Anime**, **Software**, and **Music**.
 - **🔄 Dynamic Sorting:** Sort by **Most Seeds** (default), **Largest Size**, **Smallest Size**, or **Newest Date**.
@@ -59,7 +61,7 @@ omarchy restart shell
 | **Click category pill** | Switch category filter & re-search instantly |
 | **Click provider selector** | Toggle between All Indexers or a specific site |
 | **Click sort selector** | Cycle sorting modes (Most Seeds, Size, Date) |
-| **`󰣐` on result card** | Launch magnet link into default desktop torrent app |
+| **`󰚌` on result card** | Launch magnet link into qBittorrent or desktop app |
 | **`󰆏` on result card** | Copy clean magnet link to clipboard (`wl-copy`) |
 | **`Esc`** | Close search panel |
 

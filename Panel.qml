@@ -959,8 +959,8 @@ Panel {
                     }
 
                     PanelActionButton {
-                      iconText: panelRoot.qbConnected ? "󰚌" : "󰣐"
-                      tooltipText: panelRoot.qbConnected ? "Add directly to qBittorrent" : "Launch in Default Torrent Client"
+                      iconText: "󰚌"
+                      tooltipText: panelRoot.qbConnected ? "Add directly to qBittorrent" : "Launch Magnet in Desktop Client"
                       foreground: "#87c095"
                       onClicked: panelRoot.launchTorrent(modelData.magnet, modelData.title)
                     }
