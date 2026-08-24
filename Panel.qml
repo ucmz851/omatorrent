@@ -1836,7 +1836,7 @@ Panel {
                     anchors.margins: Style.space(8)
                     spacing: Style.space(6)
 
-                    Text { textFormat: Text.PlainText; text: "󰌷 Recommended Client: qBittorrent (sudo pacman -S qbittorrent)"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                    Text { textFormat: Text.PlainText; text: "󰌷 Recommended Client: qBittorrent"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
                     Text { textFormat: Text.PlainText; text: "1. Open qBittorrent on your desktop."; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                     Text { textFormat: Text.PlainText; text: "2. Go to Tools ➔ Preferences (Alt+O) ➔ Web UI."; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
                     Text { textFormat: Text.PlainText; text: "3. Check 'Web User Interface (Remote control)'."; color: panelRoot.foreground; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }

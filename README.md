@@ -39,12 +39,7 @@ While OmaTorrent can dispatch magnet links to any desktop client (such as Transm
 - **Real-Time Telemetry:** Stream live download/upload speeds, ETAs, active seed/peer ratios, and DHT node counts.
 - **Bandwidth Throttling:** Switch on **Turtle Mode** (`󱥸 / 󰓅`) or set custom speed limits (global or per-torrent) on the fly.
 - **Directory Controls:** View, open, or reconfigure default download folders directly from the widget.
-- **Open-Source & Native:** Privacy-focused, lightweight, and native to Linux with zero adware.
-
-```sh
-# Install qBittorrent on Arch Linux / Omarchy
-sudo pacman -S qbittorrent
-```
+- **Open-Source & Native:** Privacy-focused, lightweight, and native to Linux with zero adware (available in official distribution repositories as `qbittorrent`).
 
 ---
 
