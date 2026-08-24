@@ -2,40 +2,48 @@
 
 [![Omarchy 4.0+](https://img.shields.io/badge/Omarchy-4.0%2B-c6aa75?style=flat-square)](https://omarchy.org/manual/shell-plugins/)
 [![Multi-Source](https://img.shields.io/badge/Indexers-TPB%20%7C%20Lime%20%7C%20YTS%20%7C%20EZTV%20%7C%20FitGirl%20%7C%20Nyaa-6aa6b2?style=flat-square)](https://github.com/ucmz851/omatorrent)
+[![qBittorrent WebUI](https://img.shields.io/badge/qBittorrent-API%20v2%20(v4.x%20%26%20v5.x)-87c095?style=flat-square)](https://github.com/ucmz851/omatorrent)
 [![MIT License](https://img.shields.io/badge/license-MIT-7952b3?style=flat-square)](LICENSE)
 
-An ultra-fast, multi-source torrent search engine, filter aggregator, and one-click magnet launcher built natively for the **Omarchy Quattro bar**.
+An ultra-fast, multi-source torrent search engine, filter aggregator, one-click magnet dispatcher, and live **qBittorrent controller** built natively for the **Omarchy Quattro bar**.
+
+![OmaTorrent Preview](preview.png)
+
+<p align="center"><sub>Native Omarchy Quattro bar widget: Dual-tab search aggregator & real-time qBittorrent transfer controller.</sub></p>
 
 ---
 
-## Highlights
+## ✨ Highlights
 
-- **⚡ Multi-Indexer Aggregation:** Simultaneously queries **ThePirateBay**, **LimeTorrents**, **YTS** (Movies), **EZTV** (TV Shows), **FitGirl Repacks** (Games), and **Nyaa** (Anime & Media) in parallel.
-- **🧲 One-Click Magnet Dispatch:** Click `󰚌` to instantly inject into **qBittorrent** or open in your default Linux desktop torrent client (`xdg-open`).
-- **📊 Live qBittorrent Monitor:** Real-time transfer cards, live DL/UP speeds, ETA countdown, progress bars, and pause/resume/delete actions.
-- **⚙️ Advanced Speed & Path Limiters:** Configure global and per-torrent speed limits, turtle mode toggle, and customize default download folders directly in the panel.
-- **📋 Direct Wayland Clipboard:** Click `󰆏` to sanitize and copy clean magnet links to your clipboard via `wl-copy`.
-- **🏷️ Instant Categories:** Filter by **All**, **Movies**, **TV Shows**, **Games**, **Anime**, **Software**, and **Music**.
-- **🔄 Dynamic Sorting:** Sort by **Most Seeds** (default), **Largest Size**, **Smallest Size**, or **Newest Date**.
-- **⌨️ Keyboard-First Workflow:** Press global shortcut or click to open with immediate search input focus. Press `Enter` to search, `Esc` to close.
-- **🎨 Quattro Visual Design:** Dynamic bar status colors, high-contrast seed/peer counters, provider badges, and plain-text safety sanitization.
-
----
-
-## Supported Search Indexers
-
-| Provider | Type / Focus | Source / Method |
-| :--- | :--- | :--- |
-| **The Pirate Bay** | General, Movies, TV, Software | Direct JSON API (`apibay.org`) |
-| **LimeTorrents** | General, Games, Applications, Music | Fast HTML stream parser & infohash resolver |
-| **YTS** | HD / 4K Movies (YIFY) | Direct API with multi-resolution torrent streams |
-| **EZTV** | TV Episodes & Complete Seasons | Direct Show API (`eztv.re`) |
-| **FitGirl Repacks** | PC Games & Evergreen Repacks | Direct RSS XML Content Scraper |
-| **Nyaa** | Anime, Asian Media, Audio | High-speed XML RSS feed parser |
+- **⚡ Multi-Indexer Parallel Search:** Simultaneously queries **ThePirateBay**, **LimeTorrents**, **YTS** (HD/4K Movies), **EZTV** (TV Episodes), **FitGirl Repacks** (PC Games), and **Nyaa** (Anime & Media) concurrently with real-time deduplication and sorting.
+- **󰚌 Real-Time qBittorrent Monitor:** Live transfer cards displaying download/upload speeds, progress percentages (0–100%), ETA countdowns, completed vs total size, ratio metrics, and active DHT nodes.
+- **⏸️ Full Transfer Management:** Instant 1-click **Pause/Resume** (compatible with qBittorrent 5.x `/stop`/`/start` & 4.x `/pause`/`/resume`), **Force Start**, **Data Recheck**, and selective deletion (**Remove Torrent** or **Delete with Files**).
+- **⚙️ Global Bandwidth Throttling:** 1-click **Turtle Mode / Alternative Speed Limits** (`󱥸 / 󰓅`) and quick-select presets for global Download (`1 MB/s`, `5 MB/s`, `10 MB/s`, `25 MB/s`, `50 MB/s`, `Unlimited`) and Upload limits.
+- ** Per-Torrent Speed Limiters:** Set granular download and upload speed caps on individual torrents directly from each transfer card.
+- **󰉋 Download Directory Controls:** View current default save paths, launch folders directly in your Linux file manager (`xdg-open`), or edit default save locations inline.
+- **🧲 One-Click Magnet Dispatcher:** Click `󰚌` on any search result to inject it directly into qBittorrent or dispatch to your preferred desktop client (`xdg-open`).
+- **📋 Wayland Clipboard Integration:** Click `󰆏` to sanitize and copy clean magnet URIs directly to your clipboard via `wl-copy`.
+- **⌨️ Keyboard-First Workflow:** Press shortcut or click the bar widget to open with immediate search input focus. Press `Enter` to search, `Esc` to close.
+- **🎨 Dynamic Quattro Theming:** Automatically inherits your active Omarchy theme palette with alpha blending, high-contrast typography, and plain-text safety sanitization.
 
 ---
 
-## Install
+## 🚀 Quick Setup: Connecting qBittorrent (30 Seconds)
+
+OmaTorrent connects directly to your local qBittorrent desktop app via its Web UI API with zero external servers required.
+
+1. Open **qBittorrent** on your desktop.
+2. Go to **Tools** ➔ **Preferences** (or press `Alt + O`) ➔ select the **Web UI** tab.
+3. Check **"Web User Interface (Remote control)"** *(Default port is `8080`)*.
+4. Check **"Bypass authentication for clients on localhost"** *(allows OmaTorrent to stream stats instantly without login prompts)*.
+5. Click **Apply / OK**.
+
+> [!TIP]
+> **Custom Web UI Port?** If you use a port other than `8080` (e.g. `8085`, `9091`, `8000`), simply click the **"Auto-Detect"** button in OmaTorrent's Transfers tab, or enter your custom port into the port input field. OmaTorrent will automatically probe and save your active port.
+
+---
+
+## 📦 Installation
 
 OmaTorrent requires Omarchy with shell plugin support.
 
@@ -43,7 +51,7 @@ OmaTorrent requires Omarchy with shell plugin support.
 omarchy plugin add https://github.com/ucmz851/omatorrent.git --enable
 ```
 
-The shell normally picks up the plugin immediately. If the widget does not appear, restart the shell:
+The shell normally picks up the plugin immediately. If the widget does not appear on your bar, reload the shell:
 
 ```sh
 omarchy restart shell
@@ -51,47 +59,114 @@ omarchy restart shell
 
 ---
 
-## Keybindings & Usage
+## ⌨️ Navigation & Keybindings
 
-| Action | Result |
-| :--- | :--- |
-| **Left-click bar icon** | Open search popout with immediate keyboard focus |
-| **Middle-click bar icon** | Re-run last search query |
-| **`Enter` in search box** | Execute multi-indexer search |
-| **Click category pill** | Switch category filter & re-search instantly |
-| **Click provider selector** | Toggle between All Indexers or a specific site |
-| **Click sort selector** | Cycle sorting modes (Most Seeds, Size, Date) |
-| **`󰚌` on result card** | Launch magnet link into qBittorrent or desktop app |
-| **`󰆏` on result card** | Copy clean magnet link to clipboard (`wl-copy`) |
-| **`Esc`** | Close search panel |
-
----
-
-## Privacy & Safety
-
-- **100% On-Device:** No analytics, tracking tokens, or intermediate proxy servers.
-- **Direct Queries:** Search requests are sent directly to public indexers or APIs.
-- **No Background Auto-Downloads:** Magnet links are only dispatched when explicitly clicked.
-- **PlainText Sanitization:** All titles, descriptions, and metadata enforce `Text.PlainText` rendering to eliminate injection risks.
+| Action | Control / Shortcut | Result |
+| :--- | :--- | :--- |
+| **Open Panel** | Left-click bar icon (`󰚌`) | Opens OmaTorrent with instant search focus |
+| **Quick Refresh** | Middle-click bar icon (`󰚌`) | Re-runs the last search query / refreshes transfers |
+| **Execute Search** | `Enter` inside search input | Aggregates results across all selected providers |
+| **Clear Search** | Click `✕` or press `Esc` | Resets query, results, and restores blank search state |
+| **Switch Tabs** | Click `Search Indexers` / `Transfers` | Toggles between search engine and qBittorrent monitor |
+| **Filter Categories** | Click category pill (`Movies`, `Games`, etc.) | Filters results and re-queries active providers |
+| **Change Indexer** | Click provider dropdown | Switch between All Indexers (Aggregated) or a specific site |
+| **Sort Results** | Click sort dropdown | Sort by Most Seeds, Largest Size, Smallest Size, or Date |
+| **Send to qBittorrent**| Click `󰚌` on search card | Injects magnet directly into qBittorrent |
+| **Copy Magnet** | Click `󰆏` on search card | Copies clean magnet URI to Wayland clipboard |
+| **Pause / Resume** | Click `󰏤` / `󰐊` on transfer card | Pauses or resumes torrent transfer |
+| **Torrent Options** | Click `` on transfer card | Expands per-torrent speed limits & directory drawer |
+| **Open Folder** | Click `󰉋 Open Folder` | Opens the torrent download folder in your file manager |
+| **Close Panel** | `Esc` key | Closes the popout panel |
 
 ---
 
-## Development
+## 🔍 Supported Indexers & Aggregation
 
-Test the Python search engine directly:
+OmaTorrent uses a lightweight, multi-threaded Python engine (standard library only) to query indexers in parallel:
 
+| Provider | Category Coverage | Method / Protocol |
+| :--- | :--- | :--- |
+| **The Pirate Bay** | Movies, TV, Games, Software, Music, Anime | Direct JSON API (`apibay.org`) |
+| **LimeTorrents** | General, Media, Applications, Repacks | High-speed HTML stream parser & infohash resolver |
+| **YTS** | HD (720p/1080p) & 4K Ultra-HD Movies | Direct YIFY API with multi-resolution streams |
+| **EZTV** | TV Shows, Complete Seasons & Daily Episodes | Direct Show API (`eztv.re`) |
+| **FitGirl Repacks** | Verified PC Game Repacks | Direct RSS XML Feed & repack indexer |
+| **Nyaa** | Anime, Asian Media, Soundtracks, Manga | High-speed XML RSS feed parser |
+
+---
+
+## ⚙️ Speed Limiters & Controls Reference
+
+### Global Bandwidth Controls
+- **Alternative Speed Limits (`󱥸 / 󰓅`):** 1-click toggle between full unconstrained bandwidth and throttled turtle limits.
+- **Global Download Limits:** `Unlimited`, `1 MB/s`, `5 MB/s`, `10 MB/s`, `25 MB/s`, `50 MB/s`.
+- **Global Upload Limits:** `Unlimited`, `250 KB/s`, `500 KB/s`, `1 MB/s`, `2 MB/s`, `5 MB/s`.
+- **Default Save Directory:** View, open via `xdg-open`, or edit the global default download location directly in the panel.
+
+### Per-Torrent Controls (`` Drawer)
+- **Granular Speed Limits:** Set separate download/upload caps for individual active transfers.
+- **Force Start:** Bypasses global queue and active download limits.
+- **Data Integrity Check (` Recheck`):** Verifies existing piece hashes on disk.
+- **Safe / Deep Deletion:** Choose between removing only the torrent task or deleting downloaded data files from disk.
+
+---
+
+## 🛡️ Privacy, Security & PlainText Guarantee
+
+- **100% On-Device & Direct:** No intermediate proxies, tracking analytics, or telemetry collection.
+- **Localhost API Binding:** qBittorrent communication is restricted to `127.0.0.1`.
+- **PlainText Sanitization:** All scraped metadata, torrent titles, descriptions, and paths explicitly enforce `Text.PlainText` rendering in QML to eliminate rich-text or script injection vulnerabilities.
+- **Zero Bloatware:** Built using standard Python (`urllib`, `json`, `re`) and native QtQuick primitives. No heavy third-party node/pip dependencies.
+
+---
+
+## 🛠️ Troubleshooting
+
+#### 1. "Disconnected: Enable qBittorrent Web UI" message appears
+- Ensure qBittorrent is running on your machine.
+- Verify that **"Web User Interface (Remote control)"** and **"Bypass authentication for clients on localhost"** are enabled in qBittorrent **Preferences** ➔ **Web UI**.
+- If running on a custom port, click **"Auto-Detect"** or type your port number into the Port field and click **Connect**.
+
+#### 2. Magnets open in a different client instead of qBittorrent
+- If qBittorrent Web UI is disconnected, OmaTorrent falls back to `xdg-open`. To set qBittorrent as your system default handler:
+  ```sh
+  xdg-mime default org.qbittorrent.qBittorrent.desktop x-scheme-handler/magnet
+  ```
+
+#### 3. Update to the latest version
 ```sh
-python3 scripts/torrent_engine.py --query "linux iso" --category software
+omarchy plugin update ucmz851.omatorrent --yes
 ```
 
-Validate the plugin schema from the checkout:
+#### 4. Remove plugin
+```sh
+omarchy plugin remove ucmz851.omatorrent
+```
+
+---
+
+## 💻 Development & Validation
+
+Validate the plugin schema from the repository checkout:
 
 ```sh
 omarchy plugin validate .
 ```
 
+Test the search engine CLI directly:
+
+```sh
+python3 scripts/torrent_engine.py --query "ubuntu" --category software
+```
+
+Test the qBittorrent integration endpoint:
+
+```sh
+python3 scripts/torrent_engine.py --qbittorrent
+```
+
 ---
 
-## License
+## 📜 License
 
-[MIT](LICENSE) © 2026 Usama Imran (ucmz851).
+[MIT License](LICENSE) © 2026 Usama Imran Cheema ([@ucmz851](https://github.com/ucmz851)).
