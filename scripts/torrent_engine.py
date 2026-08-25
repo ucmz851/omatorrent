@@ -21,11 +21,20 @@ HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/json,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.5"
 }
-REQUEST_TIMEOUT = 4.0
-MAX_INDEXER_RESPONSE_BYTES = 2 * 1024 * 1024  # 2 MB max per remote indexer query
-MAX_QBIT_RESPONSE_BYTES = 5 * 1024 * 1024     # 5 MB max for local qBittorrent WebUI payload
+REQUEST_TIMEOUT = 3.5
+MAX_INDEXER_RESPONSE_BYTES = 1 * 1024 * 1024  # 1 MB max per remote indexer query
+MAX_QBIT_RESPONSE_BYTES = 2 * 1024 * 1024     # 2 MB max for local qBittorrent WebUI payload
 MAX_CONF_FILE_BYTES = 64 * 1024               # 64 KB max for local config file read
-MAX_OUTPUT_SEARCH_RESULTS = 100               # Cap search results to prevent memory bloat
+MAX_OUTPUT_SEARCH_RESULTS = 50                # Cap search results to 50 items
+MAX_QBIT_TORRENTS = 100                       # Cap active torrents list in qBittorrent
+
+# Strict Serialized Output Ceilings (enforced before any stdout write)
+MAX_SEARCH_STDOUT_BYTES = 256 * 1024          # 256 KB hard stdout ceiling for search results
+MAX_QBIT_STDOUT_BYTES = 512 * 1024            # 512 KB hard stdout ceiling for qBittorrent status
+MAX_ACTION_STDOUT_BYTES = 32 * 1024           # 32 KB hard stdout ceiling for actions / control
+MAX_GENERIC_STDOUT_BYTES = 16 * 1024          # 16 KB hard stdout ceiling for errors / fallback
+
+DEFAULT_DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
 
 DEFAULT_TRACKERS = [
     "udp://tracker.opentrackr.org:1337/announce",
@@ -56,14 +65,82 @@ def read_bounded(resp, max_bytes):
         chunks.append(chunk)
     return b"".join(chunks)
 
-def make_magnet(info_hash, name, trackers=None):
-    if not info_hash:
+def sanitize_str(val, max_len=256, default=""):
+    if not val:
+        return default
+    s = str(val).strip()
+    return s[:max_len]
+
+def sanitize_hash(val):
+    if not val:
         return ""
-    clean_hash = info_hash.strip().lower()
-    encoded_name = urllib.parse.quote(name.strip())
+    s = re.sub(r"[^0-9a-fA-F]", "", str(val)).strip()
+    return s[:64]
+
+def sanitize_magnet(val, max_len=2048):
+    if not val or not isinstance(val, str):
+        return ""
+    v = val.strip()
+    if not v.startswith("magnet:?"):
+        return ""
+    return v[:max_len]
+
+def _write_stdout_bytes(b):
+    if hasattr(sys.stdout, "buffer"):
+        sys.stdout.buffer.write(b)
+        sys.stdout.buffer.flush()
+    else:
+        sys.stdout.write(b.decode("utf-8", errors="ignore"))
+        sys.stdout.flush()
+
+def emit_bounded_json(payload, max_bytes=MAX_SEARCH_STDOUT_BYTES):
+    """
+    Serialize payload to compact JSON and enforce an absolute hard byte ceiling
+    before writing to stdout. Guarantees the persistent desktop shell never
+    receives an unbounded aggregate payload.
+    """
+    try:
+        encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        if len(encoded) <= max_bytes:
+            _write_stdout_bytes(encoded)
+            return
+
+        # If payload exceeds ceiling, progressively prune list fields (results or torrents)
+        if isinstance(payload, dict):
+            for key in ["results", "torrents"]:
+                if key in payload and isinstance(payload[key], list):
+                    items = list(payload[key])
+                    while items and len(encoded) > max_bytes:
+                        items = items[:max(1, len(items) // 2)] if len(items) > 1 else []
+                        payload[key] = items
+                        if "total" in payload and key == "results":
+                            payload["total"] = len(items)
+                        encoded = json.dumps(payload, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                    if len(encoded) <= max_bytes:
+                        _write_stdout_bytes(encoded)
+                        return
+
+        # If still exceeding, emit strict bounded fallback error
+        fallback = json.dumps({
+            "error": f"Output exceeded serialized ceiling of {max_bytes} bytes",
+            "results": [],
+            "torrents": []
+        }, separators=(",", ":")).encode("utf-8")[:max_bytes]
+        _write_stdout_bytes(fallback)
+    except Exception as e:
+        err_bytes = json.dumps({"error": f"Serialization error: {str(e)}"}).encode("utf-8")[:MAX_GENERIC_STDOUT_BYTES]
+        _write_stdout_bytes(err_bytes)
+
+def make_magnet(info_hash, name, trackers=None):
+    clean_hash = sanitize_hash(info_hash)
+    if not clean_hash:
+        return ""
+    clean_name = sanitize_str(name, max_len=200, default="Torrent")
+    encoded_name = urllib.parse.quote(clean_name)
     tr_list = trackers or DEFAULT_TRACKERS
-    tr_params = "&".join(f"tr={urllib.parse.quote(t)}" for t in tr_list)
-    return f"magnet:?xt=urn:btih:{clean_hash}&dn={encoded_name}&{tr_params}"
+    tr_params = "&".join(f"tr={urllib.parse.quote(t)}" for t in tr_list[:8])
+    uri = f"magnet:?xt=urn:btih:{clean_hash}&dn={encoded_name}&{tr_params}"
+    return sanitize_magnet(uri, max_len=2048)
 
 def format_bytes(size_bytes):
     try:
@@ -241,7 +318,7 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
         active_downloads = 0
         active_uploads = 0
 
-        for t in torrents_raw:
+        for t in torrents_raw[:MAX_QBIT_TORRENTS]:
             state = t.get("state", "unknown")
             if "downloading" in state.lower() or "stalleddl" in state.lower():
                 active_downloads += 1
@@ -277,8 +354,8 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 state_label = "Completed"
 
             torrents_list.append({
-                "hash": t.get("hash", ""),
-                "name": t.get("name", "Unknown Torrent"),
+                "hash": sanitize_hash(t.get("hash", "")),
+                "name": sanitize_str(t.get("name", "Unknown Torrent"), 200),
                 "size_bytes": total_size,
                 "size_str": format_bytes(total_size),
                 "completed_bytes": completed_bytes,
@@ -290,20 +367,20 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "upspeed": upspeed,
                 "upspeed_str": format_speed(upspeed),
                 "eta_str": format_eta(eta_sec),
-                "state": state,
-                "state_label": state_label,
-                "seeds": t.get("num_seeds", 0),
-                "peers": t.get("num_leechs", 0),
-                "category": t.get("category", "") or "General",
-                "save_path": t.get("save_path", ""),
-                "content_path": t.get("content_path", t.get("save_path", "")),
+                "state": sanitize_str(state, 50),
+                "state_label": sanitize_str(state_label, 50),
+                "seeds": max(0, min(1000000, int(t.get("num_seeds", 0)))),
+                "peers": max(0, min(1000000, int(t.get("num_leechs", 0)))),
+                "category": sanitize_str(t.get("category", "") or "General", 50),
+                "save_path": sanitize_str(t.get("save_path", ""), 250),
+                "content_path": sanitize_str(t.get("content_path", t.get("save_path", "")), 250),
                 "dl_limit": t_dl_limit,
                 "dl_limit_str": format_speed(t_dl_limit) if t_dl_limit > 0 else "Unlimited",
                 "up_limit": t_up_limit,
                 "up_limit_str": format_speed(t_up_limit) if t_up_limit > 0 else "Unlimited",
                 "ratio": ratio,
                 "forced": forced,
-                "added_on": t.get("added_on", 0)
+                "added_on": int(t.get("added_on", 0))
             })
 
         torrents_list.sort(key=lambda x: (x["state_label"] != "Downloading", -x["dlspeed"], -x["progress"]))
@@ -312,14 +389,14 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
         up_speed_global = int(global_info.get("up_info_speed", 0))
         global_dl_limit = int(prefs.get("dl_limit", 0))
         global_up_limit = int(prefs.get("up_limit", 0))
-        save_path = prefs.get("save_path", "/home/ucheema/Downloads")
+        save_path = prefs.get("save_path", DEFAULT_DOWNLOAD_DIR)
         alt_dl_limit = int(prefs.get("alt_dl_limit", 10240))
         alt_up_limit = int(prefs.get("alt_up_limit", 10240))
 
         return {
             "status": "connected",
             "port": actual_port,
-            "version": version,
+            "version": sanitize_str(version, 50),
             "global": {
                 "dl_speed": dl_speed_global,
                 "dl_speed_str": format_speed(dl_speed_global),
@@ -328,8 +405,8 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "active_downloads": active_downloads,
                 "active_uploads": active_uploads,
                 "total_torrents": len(torrents_list),
-                "dht_nodes": global_info.get("dht_nodes", 0),
-                "save_path": save_path,
+                "dht_nodes": int(global_info.get("dht_nodes", 0)),
+                "save_path": sanitize_str(save_path, 250),
                 "dl_limit": global_dl_limit,
                 "dl_limit_str": format_speed(global_dl_limit) if global_dl_limit > 0 else "Unlimited",
                 "up_limit": global_up_limit,
@@ -338,13 +415,13 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "alt_dl_limit_str": format_speed(alt_dl_limit),
                 "alt_up_limit_str": format_speed(alt_up_limit)
             },
-            "torrents": torrents_list
+            "torrents": torrents_list[:MAX_QBIT_TORRENTS]
         }
     except Exception as e:
         return {
             "status": "disconnected",
             "port": actual_port,
-            "error": str(e),
+            "error": sanitize_str(str(e), 200),
             "global": {
                 "dl_speed": 0,
                 "dl_speed_str": "0 B/s",
@@ -353,7 +430,7 @@ def get_qbittorrent_data(host="127.0.0.1", port=8080):
                 "active_downloads": 0,
                 "active_uploads": 0,
                 "total_torrents": 0,
-                "save_path": "/home/ucheema/Downloads",
+                "save_path": DEFAULT_DOWNLOAD_DIR,
                 "dl_limit_str": "Unlimited",
                 "up_limit_str": "Unlimited",
                 "alt_mode": False
@@ -484,17 +561,17 @@ def search_tpb(query, category_filter="all"):
                         pass
 
                 results.append({
-                    "title": name,
+                    "title": sanitize_str(name, 250),
                     "provider": "ThePirateBay",
                     "provider_badge": "TPB",
-                    "category": cat_label,
-                    "size": format_bytes(size_bytes),
+                    "category": sanitize_str(cat_label, 50),
+                    "size": sanitize_str(format_bytes(size_bytes), 50),
                     "size_bytes": size_bytes,
-                    "seeds": seeds,
-                    "leechers": leechers,
-                    "date": date_val,
-                    "magnet": make_magnet(info_hash, name),
-                    "info_hash": info_hash
+                    "seeds": max(0, min(1000000, seeds)),
+                    "leechers": max(0, min(1000000, leechers)),
+                    "date": sanitize_str(date_val, 50),
+                    "magnet": sanitize_magnet(make_magnet(info_hash, name)),
+                    "info_hash": sanitize_hash(info_hash)
                 })
     except Exception:
         pass
@@ -561,17 +638,17 @@ def search_limetorrents(query, category_filter="all"):
             date_clean = date_cat.split("- in")[0].strip() if "- in" in date_cat else date_cat
 
             results.append({
-                "title": title,
+                "title": sanitize_str(title, 250),
                 "provider": "LimeTorrents",
                 "provider_badge": "Lime",
-                "category": cat_label,
-                "size": size_str,
+                "category": sanitize_str(cat_label, 50),
+                "size": sanitize_str(size_str, 50),
                 "size_bytes": size_bytes,
-                "seeds": seeds,
-                "leechers": leechers,
-                "date": date_clean,
-                "magnet": make_magnet(info_hash, title),
-                "info_hash": info_hash
+                "seeds": max(0, min(1000000, seeds)),
+                "leechers": max(0, min(1000000, leechers)),
+                "date": sanitize_str(date_clean, 50),
+                "magnet": sanitize_magnet(make_magnet(info_hash, title)),
+                "info_hash": sanitize_hash(info_hash)
             })
     except Exception:
         pass
@@ -611,17 +688,17 @@ def search_yts(query, category_filter="all"):
                     date_uploaded = t.get("date_uploaded", "").split()[0] if t.get("date_uploaded") else str(year)
 
                     results.append({
-                        "title": title_full,
+                        "title": sanitize_str(title_full, 250),
                         "provider": "YTS",
                         "provider_badge": "YTS",
                         "category": "Movies",
-                        "size": size_str,
+                        "size": sanitize_str(size_str, 50),
                         "size_bytes": size_bytes,
-                        "seeds": seeds,
-                        "leechers": peers,
-                        "date": date_uploaded,
-                        "magnet": make_magnet(info_hash, title_full),
-                        "info_hash": info_hash
+                        "seeds": max(0, min(1000000, seeds)),
+                        "leechers": max(0, min(1000000, peers)),
+                        "date": sanitize_str(date_uploaded, 50),
+                        "magnet": sanitize_magnet(make_magnet(info_hash, title_full)),
+                        "info_hash": sanitize_hash(info_hash)
                     })
             if results:
                 break
@@ -661,17 +738,17 @@ def search_eztv(query, category_filter="all"):
                 magnet_url = make_magnet(info_hash, title)
 
             results.append({
-                "title": title,
+                "title": sanitize_str(title, 250),
                 "provider": "EZTV",
                 "provider_badge": "EZTV",
                 "category": "TV",
-                "size": format_bytes(size_bytes),
+                "size": sanitize_str(format_bytes(size_bytes), 50),
                 "size_bytes": size_bytes,
-                "seeds": seeds,
-                "leechers": peers,
-                "date": date_str,
-                "magnet": magnet_url,
-                "info_hash": info_hash
+                "seeds": max(0, min(1000000, seeds)),
+                "leechers": max(0, min(1000000, peers)),
+                "date": sanitize_str(date_str, 50),
+                "magnet": sanitize_magnet(magnet_url),
+                "info_hash": sanitize_hash(info_hash)
             })
     except Exception:
         pass
@@ -720,16 +797,16 @@ def search_fitgirl(query, category_filter="all"):
                 size_bytes = parse_size_to_bytes(size_str)
 
                 results.append({
-                    "title": f"FitGirl Repack: {title}",
+                    "title": sanitize_str(f"FitGirl Repack: {title}", 250),
                     "provider": "FitGirl",
                     "provider_badge": "FitGirl",
                     "category": "Games",
-                    "size": size_str,
+                    "size": sanitize_str(size_str, 50),
                     "size_bytes": size_bytes,
                     "seeds": 120,  # Evergreen game torrents
                     "leechers": 15,
-                    "date": date_clean,
-                    "magnet": magnets[0],
+                    "date": sanitize_str(date_clean, 50),
+                    "magnet": sanitize_magnet(magnets[0]),
                     "info_hash": ""
                 })
     except Exception:
@@ -769,17 +846,17 @@ def search_nyaa(query, category_filter="all"):
             cat_label = cat_node.text.split("-")[-1].strip() if cat_node is not None else "Anime"
 
             results.append({
-                "title": title,
+                "title": sanitize_str(title, 250),
                 "provider": "Nyaa",
                 "provider_badge": "Nyaa",
-                "category": cat_label,
-                "size": size_str,
+                "category": sanitize_str(cat_label, 50),
+                "size": sanitize_str(size_str, 50),
                 "size_bytes": parse_size_to_bytes(size_str),
-                "seeds": seeds,
-                "leechers": leechers,
-                "date": pub_date.split("+")[0].strip() if "+" in pub_date else pub_date,
-                "magnet": make_magnet(info_hash, title),
-                "info_hash": info_hash
+                "seeds": max(0, min(1000000, seeds)),
+                "leechers": max(0, min(1000000, leechers)),
+                "date": sanitize_str(pub_date.split("+")[0].strip() if "+" in pub_date else pub_date, 50),
+                "magnet": sanitize_magnet(make_magnet(info_hash, title)),
+                "info_hash": sanitize_hash(info_hash)
             })
     except Exception:
         pass
@@ -883,19 +960,19 @@ def search_all(query, category="all", provider="all", sort_mode="seeds"):
     elapsed_ms = round((time.time() - start_time) * 1000)
 
     return {
-        "query": query,
-        "category": category,
-        "provider": provider,
-        "sort": sort_mode,
-        "total": len(deduped),
+        "query": sanitize_str(query, 100),
+        "category": sanitize_str(category, 50),
+        "provider": sanitize_str(provider, 50),
+        "sort": sanitize_str(sort_mode, 50),
+        "total": min(len(deduped), MAX_OUTPUT_SEARCH_RESULTS),
         "time_ms": elapsed_ms,
         "providers": provider_stats,
-        "results": deduped[:50]
+        "results": deduped[:MAX_OUTPUT_SEARCH_RESULTS]
     }
 
 def main():
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: torrent_engine.py --query <search_term> | --qbittorrent | --qb-action <action> <target>"}))
+        emit_bounded_json({"error": "Usage: torrent_engine.py --query <search_term> | --qbittorrent | --qb-action <action> <target>"}, MAX_GENERIC_STDOUT_BYTES)
         return
 
     action = sys.argv[1]
@@ -904,7 +981,7 @@ def main():
         port = 8080
         if len(sys.argv) > 2 and sys.argv[2].isdigit():
             port = int(sys.argv[2])
-        print(json.dumps(get_qbittorrent_data(port=port)))
+        emit_bounded_json(get_qbittorrent_data(port=port), MAX_QBIT_STDOUT_BYTES)
         return
 
     if action == "--qb-action" and len(sys.argv) >= 3:
@@ -918,12 +995,12 @@ def main():
             if act not in ["set_global_dl_limit", "set_global_up_limit", "set_torrent_dl_limit", "set_torrent_up_limit"]:
                 port = int(extra)
                 extra = None
-        print(json.dumps(control_qbittorrent(act, target, extra=extra, port=port)))
+        emit_bounded_json(control_qbittorrent(act, target, extra=extra, port=port), MAX_ACTION_STDOUT_BYTES)
         return
 
     if action == "--test-providers":
         test_out = search_all("ubuntu", category="all", provider="all")
-        print(json.dumps(test_out, indent=2))
+        emit_bounded_json(test_out, MAX_SEARCH_STDOUT_BYTES)
         return
 
     if action == "--query" and len(sys.argv) > 2:
@@ -947,10 +1024,10 @@ def main():
                 i += 1
 
         output = search_all(query_val, category=cat_val, provider=prov_val, sort_mode=sort_val)
-        print(json.dumps(output, indent=2))
+        emit_bounded_json(output, MAX_SEARCH_STDOUT_BYTES)
         return
 
-    print(json.dumps({"error": f"Unknown argument: {action}"}))
+    emit_bounded_json({"error": f"Unknown argument: {action}"}, MAX_GENERIC_STDOUT_BYTES)
 
 if __name__ == "__main__":
     main()

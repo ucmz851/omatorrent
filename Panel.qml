@@ -46,7 +46,7 @@ Panel {
   property bool qbConnected: false
   property string qbVersion: ""
   property string qbPortStr: "8080"
-  property var qbGlobal: ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0, save_path: "/home/ucheema/Downloads", dl_limit: 0, dl_limit_str: "Unlimited", up_limit: 0, up_limit_str: "Unlimited", alt_mode: false, alt_dl_limit_str: "10 KB/s", alt_up_limit_str: "10 KB/s" })
+  property var qbGlobal: ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0, save_path: (Quickshell.env("HOME") || "") + "/Downloads", dl_limit: 0, dl_limit_str: "Unlimited", up_limit: 0, up_limit_str: "Unlimited", alt_mode: false, alt_dl_limit_str: "10 KB/s", alt_up_limit_str: "10 KB/s" })
   property var qbTorrents: []
   property bool isPollingQb: false
   property string expandedTorrentHash: ""
@@ -220,14 +220,14 @@ Panel {
       onStreamFinished: {
         panelRoot.isSearching = false
         if (!text || text.trim() === "") return
-        // Enforce 2MB maximum byte ceiling on helper search output to prevent memory exhaustion
-        if (text.length > 2 * 1024 * 1024) {
-          console.log("OmaTorrent: search output exceeded 2MB byte ceiling")
+        // Enforce 256KB maximum byte ceiling on helper search output to prevent memory exhaustion
+        if (text.length > 256 * 1024) {
+          console.log("OmaTorrent: search output exceeded byte ceiling")
           return
         }
         try {
           var data = JSON.parse(text)
-          panelRoot.searchResults = (data.results || []).slice(0, 100)
+          panelRoot.searchResults = (data.results || []).slice(0, 50)
           panelRoot.searchDurationMs = data.time_ms || 0
         } catch (e) {
           console.log("OmaTorrent parse error:", e)
@@ -238,7 +238,7 @@ Panel {
       waitForEnd: true
       onStreamFinished: {
         if (text && text.trim() !== "") {
-          if (text.length <= 64 * 1024) {
+          if (text.length <= 16 * 1024) {
             console.log("OmaTorrent stderr:", text)
           }
         }
@@ -254,9 +254,9 @@ Panel {
       onStreamFinished: {
         panelRoot.isPollingQb = false
         if (!text || text.trim() === "") return
-        // Enforce 5MB maximum byte ceiling on qBittorrent payload to prevent memory exhaustion
-        if (text.length > 5 * 1024 * 1024) {
-          console.log("OmaTorrent: qBittorrent output exceeded 5MB byte ceiling")
+        // Enforce 512KB maximum byte ceiling on qBittorrent payload to prevent memory exhaustion
+        if (text.length > 512 * 1024) {
+          console.log("OmaTorrent: qBittorrent output exceeded byte ceiling")
           return
         }
         try {
@@ -265,7 +265,7 @@ Panel {
           panelRoot.qbVersion = data.version || ""
           if (data.port) panelRoot.qbPortStr = data.port.toString()
           panelRoot.qbGlobal = data.global || ({ dl_speed: 0, dl_speed_str: "0 B/s", up_speed: 0, up_speed_str: "0 B/s", active_downloads: 0, active_uploads: 0, total_torrents: 0, dht_nodes: 0 })
-          panelRoot.qbTorrents = data.torrents || []
+          panelRoot.qbTorrents = (data.torrents || []).slice(0, 100)
         } catch (e) {
           console.log("qBittorrent parse error:", e)
         }
@@ -279,7 +279,7 @@ Panel {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
-        if (text && text.length > 256 * 1024) return
+        if (text && text.length > 32 * 1024) return
         panelRoot.pollQBittorrent()
       }
     }
@@ -1152,14 +1152,14 @@ Panel {
                       PanelActionButton {
                         iconText: "󰉋"
                         tooltipText: "Open in File Manager"
-                        onClicked: Quickshell.execDetached(["xdg-open", panelRoot.qbGlobal.save_path || "/home/ucheema/Downloads"])
+                        onClicked: Quickshell.execDetached(["xdg-open", panelRoot.qbGlobal.save_path || ((Quickshell.env("HOME") || "") + "/Downloads")])
                       }
 
                       PanelActionButton {
                         iconText: "󰏫"
                         tooltipText: "Change Default Download Directory"
                         onClicked: {
-                          panelRoot.customPathInputText = panelRoot.qbGlobal.save_path || "/home/ucheema/Downloads"
+                          panelRoot.customPathInputText = panelRoot.qbGlobal.save_path || ((Quickshell.env("HOME") || "") + "/Downloads")
                           panelRoot.showSavePathEdit = !panelRoot.showSavePathEdit
                         }
                       }
