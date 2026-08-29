@@ -9,8 +9,8 @@ import qs.Ui
 Panel {
   id: panelRoot
 
-  moduleName: "ucmz851.omatorrent"
-  ipcTarget: "ucmz851.omatorrent"
+  moduleName: "ucmz851.omatorrent-client"
+  ipcTarget: "ucmz851.omatorrent-client"
   manageIpc: false
 
   property var anchorItem: null

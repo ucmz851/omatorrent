@@ -150,12 +150,12 @@ OmaTorrent uses a lightweight, multi-threaded Python engine (standard library on
 
 #### 3. Update to the latest version
 ```sh
-omarchy plugin update ucmz851.omatorrent --yes
+omarchy plugin update ucmz851.omatorrent-client --yes
 ```
 
 #### 4. Remove plugin
 ```sh
-omarchy plugin remove ucmz851.omatorrent
+omarchy plugin remove ucmz851.omatorrent-client
 ```
 
 ---

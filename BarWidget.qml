@@ -4,7 +4,7 @@ import qs.Ui
 
 BarWidget {
   id: root
-  moduleName: "ucmz851.omatorrent"
+  moduleName: "ucmz851.omatorrent-client"
 
   function injectPanel() {
     var target = panelLoader.item
