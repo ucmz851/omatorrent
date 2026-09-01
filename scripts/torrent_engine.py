@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-OmaTorrent Multi-Source Torrent Search Engine
-Aggregates search results from ThePirateBay, LimeTorrents, YTS, EZTV, FitGirl, and Nyaa.
-Provides 1-click magnet URI generation, categories, and fast multi-threaded execution.
+OmaTorrent Customizable Torrent Search Engine & qBittorrent Controller
+Supports user-configurable indexers (Internet Archive, Linux Tracker, Torznab,
+custom RSS feeds, and JSON APIs) stored in ~/.config/omarchy/omatorrent_indexers.json.
+Provides 1-click magnet URI dispatching and real-time qBittorrent WebUI telemetry.
 """
 
 import sys
@@ -33,6 +34,31 @@ MAX_SEARCH_STDOUT_BYTES = 256 * 1024          # 256 KB hard stdout ceiling for s
 MAX_QBIT_STDOUT_BYTES = 512 * 1024            # 512 KB hard stdout ceiling for qBittorrent status
 MAX_ACTION_STDOUT_BYTES = 32 * 1024           # 32 KB hard stdout ceiling for actions / control
 MAX_GENERIC_STDOUT_BYTES = 16 * 1024          # 16 KB hard stdout ceiling for errors / fallback
+
+INDEXERS_CONFIG_DIR = os.path.expanduser("~/.config/omarchy")
+INDEXERS_CONFIG_PATH = os.path.join(INDEXERS_CONFIG_DIR, "omatorrent_indexers.json")
+FALLBACK_CONFIG_PATH = os.path.expanduser("~/.config/omatorrent/indexers.json")
+
+DEFAULT_INDEXERS = [
+    {
+        "id": "archive_org",
+        "name": "Internet Archive",
+        "badge": "Archive",
+        "enabled": True,
+        "type": "archive_org",
+        "url": "https://archive.org/advancedsearch.php",
+        "desc": "Public domain media, open-source software, books, and Linux distribution ISOs"
+    },
+    {
+        "id": "linuxtracker",
+        "name": "LinuxTracker",
+        "badge": "LNX",
+        "enabled": True,
+        "type": "rss",
+        "url": "https://linuxtracker.org/rss.php",
+        "desc": "Verified Linux and BSD distribution ISO release feeds"
+    }
+]
 
 DEFAULT_DOWNLOAD_DIR = os.path.expanduser("~/Downloads")
 
@@ -81,9 +107,9 @@ def sanitize_magnet(val, max_len=2048):
     if not val or not isinstance(val, str):
         return ""
     v = val.strip()
-    if not v.startswith("magnet:?"):
-        return ""
-    return v[:max_len]
+    if v.startswith("magnet:?") or v.startswith("https://") or v.startswith("http://"):
+        return v[:max_len]
+    return ""
 
 def _write_stdout_bytes(b):
     if hasattr(sys.stdout, "buffer"):
@@ -209,6 +235,9 @@ def parse_size_to_bytes(size_str):
     return int(val * multipliers.get(unit, 1024**2))
 
 def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_bytes=MAX_INDEXER_RESPONSE_BYTES):
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ["http", "https"]:
+        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
     req = urllib.request.Request(url, headers=HEADERS)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         content = read_bounded(resp, max_bytes)
@@ -217,6 +246,65 @@ def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_byt
         if as_xml:
             return ET.fromstring(content)
         return content.decode('utf-8', errors='ignore')
+
+# -----------------------------------------------------------------------------
+# User Indexers Configuration Manager
+# -----------------------------------------------------------------------------
+def get_indexers_config_path():
+    if os.path.exists(INDEXERS_CONFIG_PATH):
+        return INDEXERS_CONFIG_PATH
+    if os.path.exists(FALLBACK_CONFIG_PATH):
+        return FALLBACK_CONFIG_PATH
+    return INDEXERS_CONFIG_PATH
+
+def load_indexers_config():
+    conf_file = get_indexers_config_path()
+    if os.path.exists(conf_file):
+        try:
+            if os.path.getsize(conf_file) <= MAX_CONF_FILE_BYTES:
+                with open(conf_file, "r", encoding="utf-8", errors="ignore") as f:
+                    data = json.loads(f.read(MAX_CONF_FILE_BYTES))
+                    if isinstance(data, dict) and "indexers" in data and isinstance(data["indexers"], list):
+                        clean_list = []
+                        for idx in data["indexers"]:
+                            if not isinstance(idx, dict):
+                                continue
+                            clean_list.append({
+                                "id": sanitize_str(idx.get("id"), 50, default="custom"),
+                                "name": sanitize_str(idx.get("name"), 80, default="Custom Indexer"),
+                                "badge": sanitize_str(idx.get("badge"), 12, default="Custom"),
+                                "enabled": bool(idx.get("enabled", True)),
+                                "type": sanitize_str(idx.get("type"), 30, default="rss"),
+                                "url": sanitize_str(idx.get("url"), 1024, default=""),
+                                "apikey": sanitize_str(idx.get("apikey"), 256, default=""),
+                                "desc": sanitize_str(idx.get("desc"), 200, default="")
+                            })
+                        return {"version": 1, "indexers": clean_list, "config_path": conf_file}
+        except Exception:
+            pass
+
+    try:
+        os.makedirs(os.path.dirname(conf_file), exist_ok=True)
+        init_data = {
+            "version": 1,
+            "description": "User-configurable indexers for OmaTorrent. Add custom Torznab (Jackett/Prowlarr), RSS, or API endpoints.",
+            "indexers": DEFAULT_INDEXERS
+        }
+        with open(conf_file, "w", encoding="utf-8") as f:
+            json.dump(init_data, f, indent=2)
+        return {"version": 1, "indexers": DEFAULT_INDEXERS, "config_path": conf_file}
+    except Exception:
+        return {"version": 1, "indexers": DEFAULT_INDEXERS, "config_path": conf_file}
+
+def save_indexers_config(config_dict):
+    conf_file = get_indexers_config_path()
+    try:
+        os.makedirs(os.path.dirname(conf_file), exist_ok=True)
+        with open(conf_file, "w", encoding="utf-8") as f:
+            json.dump(config_dict, f, indent=2)
+        return True
+    except Exception:
+        return False
 
 # -----------------------------------------------------------------------------
 # qBittorrent WebUI API Engine
@@ -512,359 +600,277 @@ def control_qbittorrent(action, target, extra=None, host="127.0.0.1", port=8080)
     return {"status": "error", "message": last_err or f"Action '{action}' failed"}
 
 # -----------------------------------------------------------------------------
-# Provider 1: The Pirate Bay (via apibay.org)
+# Dynamic Config-Driven Indexer Search Providers
 # -----------------------------------------------------------------------------
-def search_tpb(query, category_filter="all"):
+
+def search_archive_org(indexer, query, category_filter="all"):
+    """
+    Query Internet Archive BitTorrent metadata API for legal public domain media,
+    open software, books, audio, and Linux ISOs.
+    """
     results = []
     try:
-        cat_code = ""
-        if category_filter in ["movies", "tv"]:
-            cat_code = "&cat=200"
-        elif category_filter == "music":
-            cat_code = "&cat=100"
-        elif category_filter == "games":
-            cat_code = "&cat=400"
-        elif category_filter == "software":
-            cat_code = "&cat=300"
+        clean_q = urllib.parse.quote(query)
+        base_url = indexer.get("url") or "https://archive.org/advancedsearch.php"
+        search_url = f"{base_url}?q=title%3A%28{clean_q}%29+AND+format%3A%28%22Archive+BitTorrent%22%29&fl%5B%5D=identifier,title,downloads,item_size,publicdate,mediatype&sort%5B%5D=downloads+desc&rows=30&output=json"
+        data = fetch_url(search_url, as_json=True)
+        docs = data.get("response", {}).get("docs", [])
+        badge = indexer.get("badge") or "Archive"
+        p_name = indexer.get("name") or "Internet Archive"
 
-        url = f"https://apibay.org/q.php?q={urllib.parse.quote(query)}{cat_code}"
-        data = fetch_url(url, as_json=True)
-        if isinstance(data, list):
-            for item in data:
-                name = item.get("name", "").strip()
-                info_hash = item.get("info_hash", "").strip()
-                if not name or not info_hash or info_hash == "0000000000000000000000000000000000000000" or name == "No results found":
-                    continue
+        for doc in docs:
+            ident = doc.get("identifier")
+            title = doc.get("title") or ident
+            if not ident or not title:
+                continue
+            size_bytes = int(doc.get("item_size", 0))
+            downloads = int(doc.get("downloads", 0))
+            seeds = max(5, min(1000, downloads // 200))
+            leechers = max(1, seeds // 8)
+            pub_date = doc.get("publicdate", "").split("T")[0] if doc.get("publicdate") else ""
+            media_type = doc.get("mediatype", "software")
 
-                size_bytes = int(item.get("size", 0))
-                seeds = int(item.get("seeders", 0))
-                leechers = int(item.get("leechers", 0))
-                cat_id = str(item.get("category", ""))
-                
-                # Category label
-                cat_label = "Other"
-                if cat_id.startswith("1"):
-                    cat_label = "Music"
-                elif cat_id.startswith("2"):
-                    cat_label = "Movies" if "201" in cat_id or "207" in cat_id else "TV"
-                elif cat_id.startswith("3"):
-                    cat_label = "Software"
-                elif cat_id.startswith("4"):
-                    cat_label = "Games"
+            cat_label = "Software"
+            if media_type in ["audio", "etree"]:
+                cat_label = "Music"
+            elif media_type in ["movies", "animation"]:
+                cat_label = "Movies"
+            elif media_type in ["texts"]:
+                cat_label = "Documents"
 
-                date_val = ""
-                added_ts = item.get("added")
-                if added_ts and str(added_ts).isdigit():
-                    try:
-                        date_val = time.strftime("%Y-%m-%d", time.gmtime(int(added_ts)))
-                    except Exception:
-                        pass
-
-                results.append({
-                    "title": sanitize_str(name, 250),
-                    "provider": "ThePirateBay",
-                    "provider_badge": "TPB",
-                    "category": sanitize_str(cat_label, 50),
-                    "size": sanitize_str(format_bytes(size_bytes), 50),
-                    "size_bytes": size_bytes,
-                    "seeds": max(0, min(1000000, seeds)),
-                    "leechers": max(0, min(1000000, leechers)),
-                    "date": sanitize_str(date_val, 50),
-                    "magnet": sanitize_magnet(make_magnet(info_hash, name)),
-                    "info_hash": sanitize_hash(info_hash)
-                })
+            torrent_url = f"https://archive.org/download/{urllib.parse.quote(ident)}/{urllib.parse.quote(ident)}_archive.torrent"
+            results.append({
+                "title": sanitize_str(title, 250),
+                "provider": sanitize_str(p_name, 50),
+                "provider_badge": sanitize_str(badge, 20),
+                "category": sanitize_str(cat_label, 50),
+                "size": sanitize_str(format_bytes(size_bytes), 50),
+                "size_bytes": size_bytes,
+                "seeds": seeds,
+                "leechers": leechers,
+                "date": sanitize_str(pub_date, 50),
+                "magnet": sanitize_magnet(torrent_url),
+                "info_hash": ""
+            })
     except Exception:
         pass
     return results
 
-# -----------------------------------------------------------------------------
-# Provider 2: LimeTorrents (limetorrents.fun)
-# -----------------------------------------------------------------------------
-def search_limetorrents(query, category_filter="all"):
+def search_rss(indexer, query, category_filter="all"):
+    """
+    Parse standard BitTorrent XML RSS 2.0 / Atom feeds (e.g. LinuxTracker,
+    distribution release trackers, or community feeds).
+    """
     results = []
     try:
-        url = f"https://www.limetorrents.fun/search/all/{urllib.parse.quote(query)}/seeds/1/"
-        html = fetch_url(url)
-        
-        pattern = re.compile(
-            r'itorrents\.net/torrent/([0-9a-fA-F]{40})\.torrent.*?'
-            r'<a href=\"(/[^\"<>]+-torrent-\d+\.html)\">([^<]+)</a></div>.*?'
-            r'<td class=\"tdnormal\">([^<]+)</td>.*?'
-            r'<td class=\"tdnormal\">([^<]+)</td>.*?'
-            r'<td class=\"tdseed\">([^<]+)</td>.*?'
-            r'<td class=\"tdleech\">([^<]+)</td>',
-            re.DOTALL
-        )
+        base_url = indexer.get("url")
+        if not base_url:
+            return []
+        clean_q = urllib.parse.quote(query)
+        sep = "&" if "?" in base_url else "?"
+        url = f"{base_url}{sep}search={clean_q}"
+        badge = indexer.get("badge") or "RSS"
+        p_name = indexer.get("name") or "RSS Feed"
 
-        for match in pattern.finditer(html):
-            info_hash = match.group(1).strip()
-            title = match.group(3).strip()
-            date_cat = match.group(4).strip()
-            size_str = match.group(5).strip()
-            seeds_str = match.group(6).strip().replace(",", "")
-            leech_str = match.group(7).strip().replace(",", "")
+        root = fetch_url(url, as_xml=True)
+        tokens = [t.lower() for t in query.split() if len(t) > 1]
 
-            seeds = int(seeds_str) if seeds_str.isdigit() else 0
-            leechers = int(leech_str) if leech_str.isdigit() else 0
-            size_bytes = parse_size_to_bytes(size_str)
+        for item in root.findall('./channel/item'):
+            title_node = item.find('title')
+            title = title_node.text.strip() if title_node is not None and title_node.text else ""
+            if not title:
+                continue
+            if tokens and not any(t in title.lower() for t in tokens):
+                continue
 
-            # Extract category strictly from LimeTorrents date_cat text
-            cat_label = "General"
-            date_cat_lower = date_cat.lower()
-            if "application" in date_cat_lower or "software" in date_cat_lower:
-                cat_label = "Software"
-            elif "movie" in date_cat_lower:
-                cat_label = "Movies"
-            elif "tv" in date_cat_lower or "television" in date_cat_lower:
-                cat_label = "TV"
-            elif "game" in date_cat_lower:
-                cat_label = "Games"
-            elif "music" in date_cat_lower or "audio" in date_cat_lower:
-                cat_label = "Music"
-            elif "anime" in date_cat_lower:
-                cat_label = "Anime"
+            link_node = item.find('link')
+            link = link_node.text.strip() if link_node is not None and link_node.text else ""
+            desc_node = item.find('description')
+            desc = desc_node.text or ""
+            pub_date_node = item.find('pubDate')
+            pub_date = pub_date_node.text.strip() if pub_date_node is not None and pub_date_node.text else ""
 
-            # Check title heuristics for better categorization if marked General
-            if cat_label == "General":
-                title_lower = title.lower()
-                if any(ext in title_lower for ext in [".repack", "repack", "fitgirl", "dodi", "codex", "cpiy", "plaza", "skidrow", "switch", "ps4", "xbox", "gog", "pc game"]):
-                    cat_label = "Games"
-                elif any(ext in title_lower for ext in ["1080p", "720p", "2160p", "bluray", "web-dl", "webrip", "hdrip", "x264", "x265", "hevc"]):
-                    if any(s_tag in title_lower for s_tag in ["s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "season", "episode", "e01", "e02"]):
-                        cat_label = "TV"
-                    else:
-                        cat_label = "Movies"
+            info_hash = ""
+            magnet = ""
+            hash_match = re.search(r'(?:id=|hash=|urn:btih:)([0-9a-fA-F]{40})', link + " " + desc)
+            if hash_match:
+                info_hash = hash_match.group(1)
+                magnet = make_magnet(info_hash, title)
+            else:
+                mag_m = re.search(r'(magnet:\?[^\s\"\'<>]+)', desc + " " + link)
+                if mag_m:
+                    magnet = mag_m.group(1)
 
-            date_clean = date_cat.split("- in")[0].strip() if "- in" in date_cat else date_cat
+            enclosure = item.find('enclosure')
+            size_bytes = 0
+            if enclosure is not None:
+                enc_url = enclosure.get('url')
+                if not magnet and enc_url:
+                    magnet = enc_url
+                enc_len = enclosure.get('length')
+                if enc_len and enc_len.isdigit():
+                    size_bytes = int(enc_len)
+
+            if not magnet and not link.endswith(".torrent") and not info_hash:
+                continue
+            if not magnet and link:
+                magnet = link
+
+            seeds = 0
+            leechers = 0
+            s_m = re.search(r'seeders?\D+(\d+)', desc, re.I)
+            if s_m:
+                seeds = int(s_m.group(1))
+            l_m = re.search(r'leechers?\D+(\d+)', desc, re.I)
+            if l_m:
+                leechers = int(l_m.group(1))
 
             results.append({
-                "title": sanitize_str(title, 250),
-                "provider": "LimeTorrents",
-                "provider_badge": "Lime",
-                "category": sanitize_str(cat_label, 50),
-                "size": sanitize_str(size_str, 50),
+                "title": sanitize_str(title.replace("[TORRENT]", "").strip(), 250),
+                "provider": sanitize_str(p_name, 50),
+                "provider_badge": sanitize_str(badge, 20),
+                "category": "Software",
+                "size": sanitize_str(format_bytes(size_bytes), 50) if size_bytes > 0 else "ISO / Media",
                 "size_bytes": size_bytes,
                 "seeds": max(0, min(1000000, seeds)),
                 "leechers": max(0, min(1000000, leechers)),
-                "date": sanitize_str(date_clean, 50),
-                "magnet": sanitize_magnet(make_magnet(info_hash, title)),
+                "date": sanitize_str(pub_date[:10] if pub_date else "", 50),
+                "magnet": sanitize_magnet(magnet),
                 "info_hash": sanitize_hash(info_hash)
             })
     except Exception:
         pass
     return results
 
-# -----------------------------------------------------------------------------
-# Provider 3: YTS Movies (yts.lt / mirrors)
-# -----------------------------------------------------------------------------
-def search_yts(query, category_filter="all"):
-    # If user selected games, software, music, or anime, YTS has none of these
-    if category_filter in ["games", "software", "music", "anime"]:
-        return []
-
-    results = []
-    domains = ["yts.lt", "yts.torrentbay.to", "yts.mx"]
-    for domain in domains:
-        try:
-            url = f"https://{domain}/api/v2/list_movies.json?query_term={urllib.parse.quote(query)}&sort_by=seeds&limit=15"
-            data = fetch_url(url, as_json=True, timeout=3.5)
-            movies = data.get("data", {}).get("movies", [])
-            if not movies:
-                continue
-
-            for movie in movies:
-                movie_title = movie.get("title_long") or movie.get("title") or "Movie"
-                year = movie.get("year", "")
-                torrents = movie.get("torrents", [])
-                for t in torrents:
-                    quality = t.get("quality", "")
-                    t_type = t.get("type", "")
-                    title_full = f"{movie_title} [{quality}] ({t_type.upper()})"
-                    info_hash = t.get("hash", "")
-                    seeds = int(t.get("seeds", 0))
-                    peers = int(t.get("peers", 0))
-                    size_str = t.get("size", "0 MB")
-                    size_bytes = int(t.get("size_bytes", parse_size_to_bytes(size_str)))
-                    date_uploaded = t.get("date_uploaded", "").split()[0] if t.get("date_uploaded") else str(year)
-
-                    results.append({
-                        "title": sanitize_str(title_full, 250),
-                        "provider": "YTS",
-                        "provider_badge": "YTS",
-                        "category": "Movies",
-                        "size": sanitize_str(size_str, 50),
-                        "size_bytes": size_bytes,
-                        "seeds": max(0, min(1000000, seeds)),
-                        "leechers": max(0, min(1000000, peers)),
-                        "date": sanitize_str(date_uploaded, 50),
-                        "magnet": sanitize_magnet(make_magnet(info_hash, title_full)),
-                        "info_hash": sanitize_hash(info_hash)
-                    })
-            if results:
-                break
-        except Exception:
-            continue
-    return results
-
-# -----------------------------------------------------------------------------
-# Provider 4: EZTV Shows (eztv.re / mirrors)
-# -----------------------------------------------------------------------------
-def search_eztv(query, category_filter="all"):
-    # If user selected games, software, music, or movies, EZTV is TV shows only
-    if category_filter in ["games", "software", "music", "movies", "anime"]:
-        return []
-
+def search_torznab(indexer, query, category_filter="all"):
+    """
+    Query standard Torznab API (used by Jackett, Prowlarr, Cardigann, etc.).
+    """
     results = []
     try:
-        url = f"https://eztv.re/api/get-torrents?limit=25&query={urllib.parse.quote(query)}"
-        data = fetch_url(url, as_json=True)
-        torrents = data.get("torrents", [])
-        for t in torrents:
-            title = t.get("title", "")
-            magnet_url = t.get("magnet_url", "")
-            info_hash = t.get("hash", "")
-            seeds = int(t.get("seeds", 0))
-            peers = int(t.get("peers", 0))
-            size_bytes = int(t.get("size_bytes", 0))
-            date_ts = t.get("date_released_unix", 0)
-            date_str = ""
-            if date_ts:
-                try:
-                    date_str = time.strftime("%Y-%m-%d", time.gmtime(int(date_ts)))
-                except Exception:
-                    pass
+        base_url = indexer.get("url")
+        if not base_url:
+            return []
+        apikey = indexer.get("apikey", "")
+        clean_q = urllib.parse.quote(query)
+        sep = "&" if "?" in base_url else "?"
+        url = f"{base_url}{sep}t=search&q={clean_q}"
+        if apikey:
+            url += f"&apikey={urllib.parse.quote(apikey)}"
 
-            if not magnet_url and info_hash:
-                magnet_url = make_magnet(info_hash, title)
+        badge = indexer.get("badge") or "Torznab"
+        p_name = indexer.get("name") or "Torznab"
 
-            results.append({
-                "title": sanitize_str(title, 250),
-                "provider": "EZTV",
-                "provider_badge": "EZTV",
-                "category": "TV",
-                "size": sanitize_str(format_bytes(size_bytes), 50),
-                "size_bytes": size_bytes,
-                "seeds": max(0, min(1000000, seeds)),
-                "leechers": max(0, min(1000000, peers)),
-                "date": sanitize_str(date_str, 50),
-                "magnet": sanitize_magnet(magnet_url),
-                "info_hash": sanitize_hash(info_hash)
-            })
-    except Exception:
-        pass
-    return results
-
-# -----------------------------------------------------------------------------
-# Provider 5: FitGirl Repacks (fitgirl-repacks.site)
-# -----------------------------------------------------------------------------
-def search_fitgirl(query, category_filter="all"):
-    if category_filter not in ["all", "games"]:
-        return []
-
-    results = []
-    try:
-        url = f"https://fitgirl-repacks.site/feed/?s={urllib.parse.quote(query)}"
         root = fetch_url(url, as_xml=True)
+        ns = {"torznab": "http://torznab.com/schemas/2015/feed"}
+
         for item in root.findall('./channel/item'):
             title_node = item.find('title')
-            title = title_node.text.strip() if title_node is not None else ""
-            if not title or "updates digest" in title.lower():
-                continue
-
-            pub_date_node = item.find('pubDate')
-            pub_date = pub_date_node.text.strip() if pub_date_node is not None else ""
-            date_clean = ""
-            if pub_date:
-                parts = pub_date.split()
-                if len(parts) >= 4:
-                    date_clean = f"{parts[3]}-{parts[2]}-{parts[1]}"
-
-            content_node = item.find('{http://purl.org/rss/1.0/modules/content/}encoded')
-            content_text = content_node.text if content_node is not None else ""
-            
-            magnets = re.findall(r'href=[\"\'](magnet:\?[^\"\']+)[\"\']', content_text)
-            if not magnets:
-                hash_match = re.search(r'magnet:\?xt=urn:btih:([0-9a-zA-Z]{40})', content_text)
-                if hash_match:
-                    magnets = [make_magnet(hash_match.group(1), title)]
-
-            if magnets:
-                size_match = re.search(r'Repack Size:\s*<strong>([^<]+)</strong>', content_text, re.IGNORECASE)
-                if not size_match:
-                    size_match = re.search(r'Size:\s*([^,\n<]+)', content_text)
-                
-                size_str = size_match.group(1).strip() if size_match else "Game Repack"
-                size_bytes = parse_size_to_bytes(size_str)
-
-                results.append({
-                    "title": sanitize_str(f"FitGirl Repack: {title}", 250),
-                    "provider": "FitGirl",
-                    "provider_badge": "FitGirl",
-                    "category": "Games",
-                    "size": sanitize_str(size_str, 50),
-                    "size_bytes": size_bytes,
-                    "seeds": 120,  # Evergreen game torrents
-                    "leechers": 15,
-                    "date": sanitize_str(date_clean, 50),
-                    "magnet": sanitize_magnet(magnets[0]),
-                    "info_hash": ""
-                })
-    except Exception:
-        pass
-    return results
-
-# -----------------------------------------------------------------------------
-# Provider 6: Nyaa Anime & Media (nyaa.si)
-# -----------------------------------------------------------------------------
-def search_nyaa(query, category_filter="all"):
-    if category_filter in ["software", "games"]:
-        return []
-
-    results = []
-    try:
-        url = f"https://nyaa.si/?page=rss&q={urllib.parse.quote(query)}&s=seeders&o=desc"
-        root = fetch_url(url, as_xml=True)
-        for item in root.findall('./channel/item'):
-            title_node = item.find('title')
-            title = title_node.text.strip() if title_node is not None else ""
+            title = title_node.text.strip() if title_node is not None and title_node.text else ""
             if not title:
                 continue
 
-            pub_date_node = item.find('pubDate')
-            pub_date = pub_date_node.text.strip() if pub_date_node is not None else ""
+            size_node = item.find('size')
+            size_bytes = int(size_node.text) if size_node is not None and size_node.text.isdigit() else 0
 
-            seeds_node = item.find('{https://nyaa.si/xmlns/nyaa}seeders')
-            leech_node = item.find('{https://nyaa.si/xmlns/nyaa}leechers')
-            size_node = item.find('{https://nyaa.si/xmlns/nyaa}size')
-            hash_node = item.find('{https://nyaa.si/xmlns/nyaa}infoHash')
-            cat_node = item.find('{https://nyaa.si/xmlns/nyaa}category')
+            enclosure = item.find('enclosure')
+            enc_url = enclosure.get('url') if enclosure is not None else ""
 
-            seeds = int(seeds_node.text) if seeds_node is not None and seeds_node.text.isdigit() else 0
-            leechers = int(leech_node.text) if leech_node is not None and leech_node.text.isdigit() else 0
-            size_str = size_node.text if size_node is not None else "Unknown"
-            info_hash = hash_node.text if hash_node is not None else ""
-            cat_label = cat_node.text.split("-")[-1].strip() if cat_node is not None else "Anime"
+            info_hash = ""
+            seeds = 0
+            leechers = 0
+            magnet = enc_url
+
+            for attr in item.findall('./torznab:attr', ns):
+                a_name = attr.get('name')
+                a_val = attr.get('value')
+                if a_name == 'infohash' and a_val:
+                    info_hash = a_val
+                elif a_name == 'seeders' and a_val and a_val.isdigit():
+                    seeds = int(a_val)
+                elif a_name == 'peers' and a_val and a_val.isdigit():
+                    leechers = int(a_val)
+                elif a_name == 'magneturl' and a_val:
+                    magnet = a_val
+
+            if not magnet and info_hash:
+                magnet = make_magnet(info_hash, title)
+
+            if not magnet:
+                continue
 
             results.append({
                 "title": sanitize_str(title, 250),
-                "provider": "Nyaa",
-                "provider_badge": "Nyaa",
-                "category": sanitize_str(cat_label, 50),
-                "size": sanitize_str(size_str, 50),
-                "size_bytes": parse_size_to_bytes(size_str),
+                "provider": sanitize_str(p_name, 50),
+                "provider_badge": sanitize_str(badge, 20),
+                "category": "General",
+                "size": sanitize_str(format_bytes(size_bytes), 50),
+                "size_bytes": size_bytes,
                 "seeds": max(0, min(1000000, seeds)),
                 "leechers": max(0, min(1000000, leechers)),
-                "date": sanitize_str(pub_date.split("+")[0].strip() if "+" in pub_date else pub_date, 50),
-                "magnet": sanitize_magnet(make_magnet(info_hash, title)),
+                "date": "",
+                "magnet": sanitize_magnet(magnet),
                 "info_hash": sanitize_hash(info_hash)
             })
     except Exception:
         pass
     return results
 
-# -----------------------------------------------------------------------------
-# Category Strict Post-Filtering
-# -----------------------------------------------------------------------------
+def search_json_api(indexer, query, category_filter="all"):
+    """
+    Query custom user-specified JSON REST API endpoint with template URL.
+    """
+    results = []
+    try:
+        url_template = indexer.get("url", "")
+        if not url_template:
+            return []
+        clean_q = urllib.parse.quote(query)
+        if "{query}" in url_template:
+            url = url_template.replace("{query}", clean_q)
+        else:
+            sep = "&" if "?" in url_template else "?"
+            url = f"{url_template}{sep}q={clean_q}"
+
+        badge = indexer.get("badge") or "API"
+        p_name = indexer.get("name") or "Search API"
+
+        data = fetch_url(url, as_json=True)
+        items = data if isinstance(data, list) else (data.get("results") or data.get("items") or data.get("data") or [])
+        if isinstance(items, list):
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                title = it.get("title") or it.get("name") or ""
+                if not title:
+                    continue
+                h = it.get("info_hash") or it.get("hash") or ""
+                mag = it.get("magnet") or (make_magnet(h, title) if h else "") or it.get("url", "")
+                size_bytes = int(it.get("size_bytes") or it.get("size", 0))
+                results.append({
+                    "title": sanitize_str(title, 250),
+                    "provider": sanitize_str(p_name, 50),
+                    "provider_badge": sanitize_str(badge, 20),
+                    "category": sanitize_str(it.get("category", "General"), 50),
+                    "size": sanitize_str(format_bytes(size_bytes), 50),
+                    "size_bytes": size_bytes,
+                    "seeds": max(0, min(1000000, int(it.get("seeds", 0)))),
+                    "leechers": max(0, min(1000000, int(it.get("leechers", 0)))),
+                    "date": sanitize_str(it.get("date", ""), 50),
+                    "magnet": sanitize_magnet(mag),
+                    "info_hash": sanitize_hash(h)
+                })
+    except Exception:
+        pass
+    return results
+
+DISPATCHERS = {
+    "archive_org": search_archive_org,
+    "rss": search_rss,
+    "torznab": search_torznab,
+    "json_api": search_json_api
+}
+
 def matches_category(item, category_filter):
     if category_filter == "all":
         return True
@@ -872,73 +878,65 @@ def matches_category(item, category_filter):
     title = (item.get("title") or "").lower()
 
     if category_filter == "games":
-        return cat == "games" or "repack" in title or "game" in title or item.get("provider") == "FitGirl"
+        return cat == "games" or "game" in title
     elif category_filter == "movies":
-        return cat in ["movies", "movie", "video"] and not ("season" in title or "episode" in title or "s0" in title)
+        return cat in ["movies", "movie", "video"]
     elif category_filter == "tv":
-        return cat in ["tv", "tv shows", "video"] or any(s in title for s in ["s01", "s02", "s03", "s04", "s05", "s06", "s07", "s08", "season", "episode", "e01", "e02"])
+        return cat in ["tv", "tv shows", "video"] or any(s in title for s in ["s01", "s02", "season", "episode"])
     elif category_filter == "anime":
-        return cat in ["anime", "raw", "translated", "lossless", "lossy"] or item.get("provider") == "Nyaa"
+        return cat in ["anime", "raw", "translated", "manga"]
     elif category_filter == "software":
-        return cat in ["software", "applications", "apps"]
+        return cat in ["software", "applications", "apps", "iso"]
     elif category_filter == "music":
-        return cat in ["music", "audio", "lossless", "lossy"]
+        return cat in ["music", "audio", "lossless"]
     return True
 
-# -----------------------------------------------------------------------------
-# Main Query Aggregator
-# -----------------------------------------------------------------------------
 def search_all(query, category="all", provider="all", sort_mode="seeds"):
     start_time = time.time()
     all_results = []
     provider_stats = {}
 
-    providers_map = {
-        "tpb": ("The Pirate Bay", search_tpb),
-        "lime": ("LimeTorrents", search_limetorrents),
-        "yts": ("YTS", search_yts),
-        "eztv": ("EZTV", search_eztv),
-        "fitgirl": ("FitGirl", search_fitgirl),
-        "nyaa": ("Nyaa", search_nyaa)
-    }
+    conf = load_indexers_config()
+    indexers = conf.get("indexers", [])
 
-    selected_providers = {}
-    if provider == "all":
-        selected_providers = providers_map
-    elif provider in providers_map:
-        selected_providers = {provider: providers_map[provider]}
-    else:
-        selected_providers = providers_map
+    active_indexers = [idx for idx in indexers if idx.get("enabled", True)]
+    if provider != "all":
+        active_indexers = [idx for idx in active_indexers if idx.get("id") == provider]
 
-    with ThreadPoolExecutor(max_workers=min(8, len(selected_providers))) as executor:
-        future_to_prov = {
-            executor.submit(func, query, category): key
-            for key, (name, func) in selected_providers.items()
-        }
+    def query_indexer(idx):
+        itype = idx.get("type", "rss")
+        handler = DISPATCHERS.get(itype, search_rss)
+        return handler(idx, query, category)
 
-        for future in as_completed(future_to_prov):
-            prov_key = future_to_prov[future]
-            prov_name = selected_providers[prov_key][0]
-            try:
-                prov_results = future.result()
-                all_results.extend(prov_results)
-                provider_stats[prov_key] = {
-                    "name": prov_name,
-                    "count": len(prov_results),
-                    "status": "ok"
-                }
-            except Exception as e:
-                provider_stats[prov_key] = {
-                    "name": prov_name,
-                    "count": 0,
-                    "status": f"error: {str(e)}"
-                }
+    if active_indexers:
+        with ThreadPoolExecutor(max_workers=min(8, len(active_indexers))) as executor:
+            future_to_idx = {
+                executor.submit(query_indexer, idx): idx
+                for idx in active_indexers
+            }
 
-    # Deduplicate by info_hash or clean title
+            for future in as_completed(future_to_idx):
+                idx = future_to_idx[future]
+                idx_id = idx.get("id")
+                idx_name = idx.get("name")
+                try:
+                    res = future.result()
+                    all_results.extend(res)
+                    provider_stats[idx_id] = {
+                        "name": idx_name,
+                        "count": len(res),
+                        "status": "ok"
+                    }
+                except Exception as e:
+                    provider_stats[idx_id] = {
+                        "name": idx_name,
+                        "count": 0,
+                        "status": f"error: {str(e)}"
+                    }
+
     seen = set()
     deduped = []
     for item in all_results:
-        # Check strict category filter
         if not matches_category(item, category):
             continue
 
@@ -947,7 +945,6 @@ def search_all(query, category="all", provider="all", sort_mode="seeds"):
             seen.add(key)
             deduped.append(item)
 
-    # Sorting
     if sort_mode == "seeds":
         deduped.sort(key=lambda x: x.get("seeds", 0), reverse=True)
     elif sort_mode == "size_desc":
@@ -972,10 +969,50 @@ def search_all(query, category="all", provider="all", sort_mode="seeds"):
 
 def main():
     if len(sys.argv) < 2:
-        emit_bounded_json({"error": "Usage: torrent_engine.py --query <search_term> | --qbittorrent | --qb-action <action> <target>"}, MAX_GENERIC_STDOUT_BYTES)
+        emit_bounded_json({"error": "Usage: torrent_engine.py --query <search_term> | --list-indexers | --qbittorrent"}, MAX_GENERIC_STDOUT_BYTES)
         return
 
     action = sys.argv[1]
+
+    if action == "--list-indexers":
+        emit_bounded_json(load_indexers_config(), MAX_ACTION_STDOUT_BYTES)
+        return
+
+    if action == "--config-path":
+        emit_bounded_json({"config_path": get_indexers_config_path()}, MAX_ACTION_STDOUT_BYTES)
+        return
+
+    if action == "--add-indexer" and len(sys.argv) > 2:
+        try:
+            new_idx = json.loads(sys.argv[2])
+            conf = load_indexers_config()
+            indexers = [i for i in conf.get("indexers", []) if i.get("id") != new_idx.get("id")]
+            indexers.append(new_idx)
+            conf["indexers"] = indexers
+            save_indexers_config(conf)
+            emit_bounded_json({"status": "success", "indexers": indexers}, MAX_ACTION_STDOUT_BYTES)
+        except Exception as e:
+            emit_bounded_json({"status": "error", "message": str(e)}, MAX_ACTION_STDOUT_BYTES)
+        return
+
+    if action == "--remove-indexer" and len(sys.argv) > 2:
+        idx_id = sys.argv[2]
+        conf = load_indexers_config()
+        conf["indexers"] = [i for i in conf.get("indexers", []) if i.get("id") != idx_id]
+        save_indexers_config(conf)
+        emit_bounded_json({"status": "success", "removed": idx_id}, MAX_ACTION_STDOUT_BYTES)
+        return
+
+    if action == "--toggle-indexer" and len(sys.argv) > 2:
+        idx_id = sys.argv[2]
+        conf = load_indexers_config()
+        for i in conf.get("indexers", []):
+            if i.get("id") == idx_id:
+                i["enabled"] = not i.get("enabled", True)
+                break
+        save_indexers_config(conf)
+        emit_bounded_json({"status": "success", "toggled": idx_id}, MAX_ACTION_STDOUT_BYTES)
+        return
 
     if action == "--qbittorrent":
         port = 8080

@@ -1,7 +1,7 @@
 # OmaTorrent for Omarchy
 
 [![Omarchy 4.0+](https://img.shields.io/badge/Omarchy-4.0%2B-c6aa75?style=flat-square)](https://omarchy.org/manual/shell-plugins/)
-[![Multi-Source](https://img.shields.io/badge/Indexers-TPB%20%7C%20Lime%20%7C%20YTS%20%7C%20EZTV%20%7C%20FitGirl%20%7C%20Nyaa-6aa6b2?style=flat-square)](https://github.com/ucmz851/omatorrent)
+[![Customizable Indexers](https://img.shields.io/badge/Indexers-Configurable%20(Archive%20%7C%20LinuxTracker%20%7C%20Torznab%20%7C%20RSS)-6aa6b2?style=flat-square)](https://github.com/ucmz851/omatorrent)
 [![qBittorrent WebUI](https://img.shields.io/badge/qBittorrent-API%20v2%20(v4.x%20%26%20v5.x)-87c095?style=flat-square)](https://github.com/ucmz851/omatorrent)
 [![MIT License](https://img.shields.io/badge/license-MIT-7952b3?style=flat-square)](LICENSE)
 
@@ -15,7 +15,7 @@ An ultra-fast, multi-source torrent search engine, filter aggregator, one-click 
 
 ## ✨ Highlights
 
-- **⚡ Multi-Indexer Parallel Search:** Simultaneously queries **ThePirateBay**, **LimeTorrents**, **YTS** (HD/4K Movies), **EZTV** (TV Episodes), **FitGirl Repacks** (PC Games), and **Nyaa** (Anime & Media) concurrently with real-time deduplication and sorting.
+- **⚡ User-Configurable Parallel Search:** Simultaneously queries user-configured indexers in parallel (Internet Archive, Linux ISO trackers, Torznab / Jackett / Prowlarr feeds, and custom BitTorrent RSS streams) with real-time deduplication and sorting.
 - **󰚌 Real-Time qBittorrent Monitor:** Live transfer cards displaying download/upload speeds, progress percentages (0–100%), ETA countdowns, completed vs total size, ratio metrics, and active DHT nodes.
 - **⏸️ Full Transfer Management:** Instant 1-click **Pause/Resume** (compatible with qBittorrent 5.x `/stop`/`/start` & 4.x `/pause`/`/resume`), **Force Start**, **Data Recheck**, and selective deletion (**Remove Torrent** or **Delete with Files**).
 - **⚙️ Global Bandwidth Throttling:** 1-click **Turtle Mode / Alternative Speed Limits** (`󱥸 / 󰓅`) and quick-select presets for global Download (`1 MB/s`, `5 MB/s`, `10 MB/s`, `25 MB/s`, `50 MB/s`, `Unlimited`) and Upload limits.
@@ -95,18 +95,68 @@ omarchy restart shell
 
 ---
 
-## 🔍 Supported Indexers & Aggregation
+## 🔍 Customizable Indexers (`omatorrent_indexers.json`)
 
-OmaTorrent uses a lightweight, multi-threaded Python engine (standard library only) to query indexers in parallel:
+OmaTorrent is a completely customizable, open-source search aggregator. Indexers are not compiled into the code—they are managed in user configuration at:
 
-| Provider | Category Coverage | Method / Protocol |
+```
+~/.config/omarchy/omatorrent_indexers.json
+```
+
+### Pre-Configured Open-Source Defaults:
+| Provider | Default Coverage | Protocol / Feed |
 | :--- | :--- | :--- |
-| **The Pirate Bay** | Movies, TV, Games, Software, Music, Anime | Direct JSON API (`apibay.org`) |
-| **LimeTorrents** | General, Media, Applications, Repacks | High-speed HTML stream parser & infohash resolver |
-| **YTS** | HD (720p/1080p) & 4K Ultra-HD Movies | Direct YIFY API with multi-resolution streams |
-| **EZTV** | TV Shows, Complete Seasons & Daily Episodes | Direct Show API (`eztv.re`) |
-| **FitGirl Repacks** | Verified PC Game Repacks | Direct RSS XML Feed & repack indexer |
-| **Nyaa** | Anime, Asian Media, Soundtracks, Manga | High-speed XML RSS feed parser |
+| **Internet Archive** | Open-source software, public domain books, audio, and historical ISOs | Direct Archive.org Metadata API |
+| **LinuxTracker** | Verified Linux & BSD distribution releases (Ubuntu, Arch, Debian, Fedora, etc.) | High-speed XML RSS Feed |
+
+---
+
+### Adding Custom Indexers (Torznab, Jackett, Prowlarr, RSS)
+
+You can add any Torznab instance (self-hosted Jackett, Prowlarr) or custom BitTorrent RSS feed by editing `~/.config/omarchy/omatorrent_indexers.json`:
+
+```json
+{
+  "version": 1,
+  "indexers": [
+    {
+      "id": "archive_org",
+      "name": "Internet Archive",
+      "badge": "Archive",
+      "enabled": true,
+      "type": "archive_org",
+      "url": "https://archive.org/advancedsearch.php"
+    },
+    {
+      "id": "linuxtracker",
+      "name": "LinuxTracker",
+      "badge": "LNX",
+      "enabled": true,
+      "type": "rss",
+      "url": "https://linuxtracker.org/rss.php"
+    },
+    {
+      "id": "my_jackett",
+      "name": "Jackett Torznab",
+      "badge": "Jackett",
+      "enabled": true,
+      "type": "torznab",
+      "url": "http://127.0.0.1:9117/api/v2.0/indexers/all/results/torznab",
+      "apikey": "your_api_key"
+    },
+    {
+      "id": "custom_rss",
+      "name": "Distribution Tracker",
+      "badge": "Distro",
+      "enabled": true,
+      "type": "rss",
+      "url": "https://example.com/feed.xml"
+    }
+  ]
+}
+```
+
+OmaTorrent automatically loads the updated indexer list dynamically on panel launch.
 
 ---
 

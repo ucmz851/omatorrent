@@ -82,14 +82,11 @@ Panel {
     { id: "music", label: "Music" }
   ]
 
-  readonly property var providerList: [
+  property string indexersConfigPath: ""
+  property var providerList: [
     { id: "all", label: "All Indexers (Aggregated)", badge: "ALL", desc: "Simultaneous multi-threaded query" },
-    { id: "tpb", label: "The Pirate Bay", badge: "TPB", desc: "General, Movies, Games, Software" },
-    { id: "lime", label: "LimeTorrents", badge: "Lime", desc: "General, Media, Apps, Repacks" },
-    { id: "yts", label: "YTS", badge: "YTS", desc: "HD & 4K Movie Releases" },
-    { id: "eztv", label: "EZTV", badge: "EZTV", desc: "TV Shows & Episodes" },
-    { id: "fitgirl", label: "FitGirl Repacks", badge: "FitGirl", desc: "Verified PC Game Repacks" },
-    { id: "nyaa", label: "Nyaa", badge: "Nyaa", desc: "Anime, Manga & Japanese Media" }
+    { id: "archive_org", label: "Internet Archive", badge: "Archive", desc: "Public domain books, audio & open software" },
+    { id: "linuxtracker", label: "LinuxTracker", badge: "LNX", desc: "Linux & BSD distribution ISO release feeds" }
   ]
 
   readonly property var sortList: [
@@ -176,12 +173,12 @@ Panel {
 
   function getProviderColor(badge) {
     switch (badge) {
-      case "TPB": return "#e5c07b"
-      case "Lime": return "#87c095"
-      case "YTS": return "#6aa6b2"
-      case "EZTV": return "#d19a66"
-      case "FitGirl": return "#c678dd"
-      case "Nyaa": return "#61afef"
+      case "Archive": return "#e5c07b"
+      case "LNX": return "#87c095"
+      case "Torznab": return "#6aa6b2"
+      case "RSS": return "#d19a66"
+      case "Jackett": return "#c678dd"
+      case "Prowlarr": return "#61afef"
       default: return Color.accent
     }
   }
@@ -285,10 +282,56 @@ Panel {
     }
   }
 
+  Process {
+    id: indexersProc
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        if (!text || text.trim() === "") return
+        if (text.length > 64 * 1024) return
+        try {
+          var data = JSON.parse(text)
+          if (data && data.config_path) panelRoot.indexersConfigPath = data.config_path
+          if (data && data.indexers && Array.isArray(data.indexers)) {
+            var list = [{ id: "all", label: "All Indexers (Aggregated)", badge: "ALL", desc: "Simultaneous multi-threaded query" }]
+            for (var i = 0; i < data.indexers.length; i++) {
+              var idx = data.indexers[i]
+              if (idx.enabled !== false) {
+                list.push({
+                  id: idx.id,
+                  label: idx.name,
+                  badge: idx.badge || idx.id.toUpperCase(),
+                  desc: idx.desc || (idx.type + " feed")
+                })
+              }
+            }
+            panelRoot.providerList = list
+          }
+        } catch (e) {
+          console.log("OmaTorrent indexers parse error:", e)
+        }
+      }
+    }
+  }
+
+  function loadIndexers() {
+    var scriptPath = Qt.resolvedUrl("scripts/torrent_engine.py").toString().replace(/^file:\/\//, "")
+    indexersProc.command = ["python3", scriptPath, "--list-indexers"]
+    indexersProc.running = true
+  }
+
+  function openIndexersConfig() {
+    var p = panelRoot.indexersConfigPath || (Quickshell.env("HOME") + "/.config/omarchy/omatorrent_indexers.json")
+    Quickshell.execDetached(["xdg-open", p])
+    panelRoot.noticeMessage = "Opened indexers config: " + p
+    noticeTimer.restart()
+  }
+
   onOpenedChanged: {
     if (opened) {
       panelRoot.providerDropdownOpen = false
       panelRoot.sortDropdownOpen = false
+      panelRoot.loadIndexers()
       panelRoot.pollQBittorrent()
       if (panelRoot.activeViewTab === "search") {
         Qt.callLater(function() {
@@ -301,7 +344,10 @@ Panel {
     }
   }
 
-  Component.onCompleted: panelRoot.pollQBittorrent()
+  Component.onCompleted: {
+    panelRoot.loadIndexers()
+    panelRoot.pollQBittorrent()
+  }
 
   KeyboardPanel {
     id: panel
@@ -797,6 +843,33 @@ Panel {
                       panelRoot.providerDropdownOpen = false
                       if (searchInput.text.trim()) panelRoot.triggerSearch()
                     }
+                  }
+              }
+
+              BorderSurface {
+                width: parent.width
+                implicitHeight: Style.space(28)
+                radius: Style.cornerRadius
+                color: "transparent"
+                borderSpec: Border.controlSpec("normal", "transparent", Color.accent)
+
+                RowLayout {
+                  anchors.fill: parent
+                  anchors.leftMargin: Style.space(8)
+                  anchors.rightMargin: Style.space(8)
+                  spacing: Style.space(8)
+
+                  Text { textFormat: Text.PlainText; text: "󰒓"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption }
+                  Text { textFormat: Text.PlainText; text: "Configure Indexers (JSON)"; color: Color.accent; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; font.bold: true }
+                  Text { textFormat: Text.PlainText; Layout.fillWidth: true; text: "· Edit ~/.config/omarchy/omatorrent_indexers.json"; color: panelRoot.subtle; font.family: panelRoot.fontFamily; font.pixelSize: Style.font.caption; elide: Text.ElideRight }
+                }
+
+                MouseArea {
+                  anchors.fill: parent
+                  cursorShape: Qt.PointingHandCursor
+                  onClicked: {
+                    panelRoot.providerDropdownOpen = false
+                    panelRoot.openIndexersConfig()
                   }
                 }
               }

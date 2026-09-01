@@ -5,7 +5,7 @@
   "version": "1.0.0",
   "author": "ucmz851",
   "license": "MIT",
-  "description": "High-speed multi-indexer torrent search engine and real-time qBittorrent transfer controller for Omarchy Quattro bar. Features magnet launching, live download progress monitoring, and speed limiters.",
+  "description": "High-performance customizable torrent search aggregator and real-time qBittorrent controller for Omarchy Quattro bar. Features user-configurable indexers (Internet Archive, Linux ISO feeds, Jackett/Prowlarr Torznab), magnet launching, and live transfer monitoring.",
   "kinds": [
     "bar-widget"
   ],
@@ -14,7 +14,7 @@
   },
   "barWidget": {
     "displayName": "OmaTorrent",
-    "description": "Search torrents across ThePirateBay, LimeTorrents, YTS, EZTV, FitGirl, and Nyaa. Copy magnet links or dispatch to your torrent client with one click.",
+    "description": "Customizable multi-source torrent search aggregator and qBittorrent transfer controller. Search across user-configured indexers with 1-click magnet dispatching.",
     "category": "Network",
     "aliases": [
       "torrent",
@@ -22,14 +22,9 @@
       "magnet",
       "download",
       "p2p",
-      "pirate",
-      "piratebay",
-      "yts",
-      "eztv",
-      "limetorrents",
-      "fitgirl",
-      "nyaa",
-      "search"
+      "qbittorrent",
+      "search",
+      "client"
     ],
     "defaultSection": "right",
     "allowMultiple": false
