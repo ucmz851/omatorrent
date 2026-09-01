@@ -248,7 +248,7 @@ def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_byt
         return content.decode('utf-8', errors='ignore')
 
 # -----------------------------------------------------------------------------
-# User Indexers Configuration Manager
+# User Indexers Configuration Manager (Enforces Strict 0600 Mode for API Keys)
 # -----------------------------------------------------------------------------
 def get_indexers_config_path():
     if os.path.exists(INDEXERS_CONFIG_PATH):
@@ -257,9 +257,60 @@ def get_indexers_config_path():
         return FALLBACK_CONFIG_PATH
     return INDEXERS_CONFIG_PATH
 
+def enforce_private_file_mode(file_path):
+    """
+    Enforces mode 0600 (-rw-------) on the credential/indexer config file.
+    Repairs any existing permissive permissions (e.g. 0644, 0664) to prevent
+    local credential leakage of Torznab API keys.
+    """
+    try:
+        if os.path.exists(file_path):
+            st = os.stat(file_path)
+            if (st.st_mode & 0o777) != 0o600:
+                os.chmod(file_path, 0o600)
+    except Exception:
+        pass
+
+def safe_write_private_json(file_path, data):
+    """
+    Creates or overwrites the JSON configuration file with strict 0600
+    permissions (-rw-------), overriding any permissive process umask.
+    """
+    try:
+        dir_path = os.path.dirname(file_path)
+        if dir_path:
+            os.makedirs(dir_path, exist_ok=True)
+            if os.path.basename(dir_path) == "omatorrent":
+                try:
+                    os.chmod(dir_path, 0o700)
+                except Exception:
+                    pass
+
+        payload = json.dumps(data, indent=2).encode("utf-8")
+        
+        # Open file descriptor with explicit 0600 mode
+        fd = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with open(fd, "wb", closefd=True) as f:
+                f.write(payload)
+        except Exception:
+            try:
+                os.close(fd)
+            except Exception:
+                pass
+            return False
+
+        # Explicit chmod ensures 0600 even if umask altered creation mode
+        os.chmod(file_path, 0o600)
+        return True
+    except Exception:
+        return False
+
 def load_indexers_config():
     conf_file = get_indexers_config_path()
     if os.path.exists(conf_file):
+        # Enforce and repair 0600 mode on existing configuration file
+        enforce_private_file_mode(conf_file)
         try:
             if os.path.getsize(conf_file) <= MAX_CONF_FILE_BYTES:
                 with open(conf_file, "r", encoding="utf-8", errors="ignore") as f:
@@ -283,28 +334,17 @@ def load_indexers_config():
         except Exception:
             pass
 
-    try:
-        os.makedirs(os.path.dirname(conf_file), exist_ok=True)
-        init_data = {
-            "version": 1,
-            "description": "User-configurable indexers for OmaTorrent. Add custom Torznab (Jackett/Prowlarr), RSS, or API endpoints.",
-            "indexers": DEFAULT_INDEXERS
-        }
-        with open(conf_file, "w", encoding="utf-8") as f:
-            json.dump(init_data, f, indent=2)
-        return {"version": 1, "indexers": DEFAULT_INDEXERS, "config_path": conf_file}
-    except Exception:
-        return {"version": 1, "indexers": DEFAULT_INDEXERS, "config_path": conf_file}
+    init_data = {
+        "version": 1,
+        "description": "User-configurable indexers for OmaTorrent. Add custom Torznab (Jackett/Prowlarr), RSS, or API endpoints.",
+        "indexers": DEFAULT_INDEXERS
+    }
+    safe_write_private_json(conf_file, init_data)
+    return {"version": 1, "indexers": DEFAULT_INDEXERS, "config_path": conf_file}
 
 def save_indexers_config(config_dict):
     conf_file = get_indexers_config_path()
-    try:
-        os.makedirs(os.path.dirname(conf_file), exist_ok=True)
-        with open(conf_file, "w", encoding="utf-8") as f:
-            json.dump(config_dict, f, indent=2)
-        return True
-    except Exception:
-        return False
+    return safe_write_private_json(conf_file, config_dict)
 
 # -----------------------------------------------------------------------------
 # qBittorrent WebUI API Engine
