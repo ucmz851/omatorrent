@@ -8,6 +8,8 @@ Provides 1-click magnet URI dispatching and real-time qBittorrent WebUI telemetr
 
 import sys
 import os
+import stat
+import tempfile
 import re
 import json
 import time
@@ -248,7 +250,7 @@ def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_byt
         return content.decode('utf-8', errors='ignore')
 
 # -----------------------------------------------------------------------------
-# User Indexers Configuration Manager (Enforces Strict 0600 Mode for API Keys)
+# User Indexers Configuration Manager (Atomic & Symlink-Safe 0600 Storage)
 # -----------------------------------------------------------------------------
 def get_indexers_config_path():
     if os.path.exists(INDEXERS_CONFIG_PATH):
@@ -257,80 +259,141 @@ def get_indexers_config_path():
         return FALLBACK_CONFIG_PATH
     return INDEXERS_CONFIG_PATH
 
-def enforce_private_file_mode(file_path):
+def is_safe_regular_file(file_path):
     """
-    Enforces mode 0600 (-rw-------) on the credential/indexer config file.
-    Repairs any existing permissive permissions (e.g. 0644, 0664) to prevent
-    local credential leakage of Torznab API keys.
+    Verifies that the path is strictly a regular file and NOT a symlink, FIFO,
+    device, or socket.
     """
     try:
-        if os.path.exists(file_path):
-            st = os.stat(file_path)
-            if (st.st_mode & 0o777) != 0o600:
-                os.chmod(file_path, 0o600)
+        if not os.path.lexists(file_path):
+            return False
+        st = os.lstat(file_path)
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+            return False
+        return True
     except Exception:
-        pass
+        return False
 
 def safe_write_private_json(file_path, data):
     """
-    Creates or overwrites the JSON configuration file with strict 0600
-    permissions (-rw-------), overriding any permissive process umask.
+    Atomically writes JSON configuration to a temporary file with strict mode
+    0600 and replaces the target file via os.replace.
+    Guarantees no symlink following (O_NOFOLLOW / lstat checks), atomic persistence,
+    and credential confidentiality even under permissive process umasks.
     """
+    temp_path = None
     try:
         dir_path = os.path.dirname(file_path)
         if dir_path:
-            os.makedirs(dir_path, exist_ok=True)
+            if not os.path.exists(dir_path):
+                os.makedirs(dir_path, mode=0o700, exist_ok=True)
+            dir_st = os.lstat(dir_path)
+            if stat.S_ISLNK(dir_st.st_mode):
+                return False
             if os.path.basename(dir_path) == "omatorrent":
                 try:
                     os.chmod(dir_path, 0o700)
                 except Exception:
                     pass
 
+        # If destination exists and is a symlink or non-regular file, reject/remove
+        if os.path.lexists(file_path):
+            dst_st = os.lstat(file_path)
+            if stat.S_ISLNK(dst_st.st_mode) or not stat.S_ISREG(dst_st.st_mode):
+                try:
+                    os.unlink(file_path)
+                except Exception:
+                    return False
+
         payload = json.dumps(data, indent=2).encode("utf-8")
-        
-        # Open file descriptor with explicit 0600 mode
-        fd = os.open(file_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+
+        # Create temporary file in same directory for atomic rename
+        temp_fd, temp_path = tempfile.mkstemp(
+            prefix=".omatorrent_cfg_",
+            suffix=".tmp",
+            dir=dir_path or "."
+        )
+
         try:
-            with open(fd, "wb", closefd=True) as f:
+            # Enforce mode 0600 on the open file descriptor
+            os.fchmod(temp_fd, 0o600)
+            with open(temp_fd, "wb", closefd=False) as f:
                 f.write(payload)
-        except Exception:
+                f.flush()
+                os.fsync(temp_fd)
+        finally:
+            os.close(temp_fd)
+
+        # Ensure temp file is a regular file owned by current user
+        tmp_st = os.lstat(temp_path)
+        if stat.S_ISLNK(tmp_st.st_mode) or not stat.S_ISREG(tmp_st.st_mode):
             try:
-                os.close(fd)
+                os.unlink(temp_path)
             except Exception:
                 pass
             return False
 
-        # Explicit chmod ensures 0600 even if umask altered creation mode
-        os.chmod(file_path, 0o600)
+        # Atomically replace target file
+        os.replace(temp_path, file_path)
+        try:
+            os.chmod(file_path, 0o600)
+        except Exception:
+            pass
         return True
+
     except Exception:
+        if temp_path and os.path.lexists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception:
+                pass
         return False
 
 def load_indexers_config():
     conf_file = get_indexers_config_path()
-    if os.path.exists(conf_file):
-        # Enforce and repair 0600 mode on existing configuration file
-        enforce_private_file_mode(conf_file)
+    
+    # If the file path exists but is a symlink or non-regular file, unlink it
+    if os.path.lexists(conf_file):
         try:
-            if os.path.getsize(conf_file) <= MAX_CONF_FILE_BYTES:
-                with open(conf_file, "r", encoding="utf-8", errors="ignore") as f:
-                    data = json.loads(f.read(MAX_CONF_FILE_BYTES))
-                    if isinstance(data, dict) and "indexers" in data and isinstance(data["indexers"], list):
-                        clean_list = []
-                        for idx in data["indexers"]:
-                            if not isinstance(idx, dict):
-                                continue
-                            clean_list.append({
-                                "id": sanitize_str(idx.get("id"), 50, default="custom"),
-                                "name": sanitize_str(idx.get("name"), 80, default="Custom Indexer"),
-                                "badge": sanitize_str(idx.get("badge"), 12, default="Custom"),
-                                "enabled": bool(idx.get("enabled", True)),
-                                "type": sanitize_str(idx.get("type"), 30, default="rss"),
-                                "url": sanitize_str(idx.get("url"), 1024, default=""),
-                                "apikey": sanitize_str(idx.get("apikey"), 256, default=""),
-                                "desc": sanitize_str(idx.get("desc"), 200, default="")
-                            })
-                        return {"version": 1, "indexers": clean_list, "config_path": conf_file}
+            st = os.lstat(conf_file)
+            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+                os.unlink(conf_file)
+        except Exception:
+            pass
+
+    if is_safe_regular_file(conf_file):
+        try:
+            open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(conf_file, open_flags)
+            try:
+                st = os.fstat(fd)
+                if stat.S_ISREG(st.st_mode) and st.st_size <= MAX_CONF_FILE_BYTES:
+                    # Enforce/repair mode 0600 directly on the file descriptor
+                    if (st.st_mode & 0o077) != 0:
+                        try:
+                            os.fchmod(fd, 0o600)
+                        except Exception:
+                            pass
+                    with open(fd, "r", encoding="utf-8", errors="ignore", closefd=False) as f:
+                        data = json.loads(f.read(MAX_CONF_FILE_BYTES))
+                        if isinstance(data, dict) and "indexers" in data and isinstance(data["indexers"], list):
+                            clean_list = []
+                            for idx in data["indexers"]:
+                                if not isinstance(idx, dict):
+                                    continue
+                                clean_list.append({
+                                    "id": sanitize_str(idx.get("id"), 50, default="custom"),
+                                    "name": sanitize_str(idx.get("name"), 80, default="Custom Indexer"),
+                                    "badge": sanitize_str(idx.get("badge"), 12, default="Custom"),
+                                    "enabled": bool(idx.get("enabled", True)),
+                                    "type": sanitize_str(idx.get("type"), 30, default="rss"),
+                                    "url": sanitize_str(idx.get("url"), 1024, default=""),
+                                    "apikey": sanitize_str(idx.get("apikey"), 256, default=""),
+                                    "desc": sanitize_str(idx.get("desc"), 200, default="")
+                                })
+                            return {"version": 1, "indexers": clean_list, "config_path": conf_file}
+            finally:
+                os.close(fd)
         except Exception:
             pass
 
@@ -353,14 +416,19 @@ def find_qbittorrent_port(preferred_port=8080):
     ports_to_try = [preferred_port] if preferred_port else []
     try:
         conf_path = os.path.expanduser('~/.config/qBittorrent/qBittorrent.conf')
-        if os.path.exists(conf_path) and os.path.getsize(conf_path) <= MAX_CONF_FILE_BYTES:
-            with open(conf_path, 'r', encoding='utf-8', errors='ignore') as f:
-                text = f.read(MAX_CONF_FILE_BYTES)
-            m = re.search(r'WebUI[\\/:]Port=(\d+)', text)
-            if m:
-                p = int(m.group(1))
-                if p not in ports_to_try:
-                    ports_to_try.append(p)
+        if is_safe_regular_file(conf_path) and os.path.getsize(conf_path) <= MAX_CONF_FILE_BYTES:
+            open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(conf_path, open_flags)
+            try:
+                with open(fd, 'r', encoding='utf-8', errors='ignore', closefd=False) as f:
+                    text = f.read(MAX_CONF_FILE_BYTES)
+                m = re.search(r'WebUI[\\/:]Port=(\d+)', text)
+                if m:
+                    p = int(m.group(1))
+                    if p not in ports_to_try:
+                        ports_to_try.append(p)
+            finally:
+                os.close(fd)
     except Exception:
         pass
 
