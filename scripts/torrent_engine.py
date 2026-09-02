@@ -10,11 +10,13 @@ import sys
 import os
 import stat
 import tempfile
+import random
 import re
 import json
 import time
 import urllib.request
 import urllib.parse
+import urllib.error
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -236,12 +238,93 @@ def parse_size_to_bytes(size_str):
     }
     return int(val * multipliers.get(unit, 1024**2))
 
-def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_bytes=MAX_INDEXER_RESPONSE_BYTES):
+# -----------------------------------------------------------------------------
+# Transport Security & Same-Origin Redirect Protection
+# -----------------------------------------------------------------------------
+def is_loopback_host(hostname):
+    """
+    Determines if hostname is an explicitly recognized local loopback endpoint.
+    """
+    if not hostname:
+        return False
+    h = hostname.strip().lower()
+    if h.startswith("[") and h.endswith("]"):
+        h = h[1:-1]
+    return h in [
+        "127.0.0.1",
+        "localhost",
+        "::1",
+        "0.0.0.0",
+        "ip6-localhost",
+        "ip6-loopback"
+    ] or h.startswith("127.")
+
+def validate_url_transport(url, has_credentials=False):
+    """
+    Enforces transport layer security:
+    - Only HTTP and HTTPS schemes allowed.
+    - Whenever credentials (API key) are present, requires HTTPS, allowing plain
+      HTTP ONLY for explicitly recognized loopback endpoints (e.g. local Jackett/Prowlarr).
+    """
     parsed = urllib.parse.urlparse(url)
-    if parsed.scheme not in ["http", "https"]:
-        raise ValueError(f"Unsupported URL scheme: {parsed.scheme}")
+    scheme = parsed.scheme.lower()
+    if scheme not in ["http", "https"]:
+        raise ValueError(f"Unsupported URL scheme: {scheme}")
+
+    hostname = parsed.hostname or ""
+    if has_credentials and scheme == "http":
+        if not is_loopback_host(hostname):
+            raise ValueError(
+                f"Transport security violation: API key transmission requires HTTPS for non-loopback host '{hostname}'"
+            )
+    return parsed
+
+class StrictSameOriginRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """
+    Restricts HTTP redirects to the exact same origin (scheme, host, port)
+    to prevent credential leakage or redirection to malicious endpoints.
+    """
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        orig_parsed = urllib.parse.urlparse(req.full_url)
+        new_parsed = urllib.parse.urlparse(newurl)
+
+        orig_scheme = orig_parsed.scheme.lower()
+        new_scheme = new_parsed.scheme.lower()
+        if new_scheme not in ["http", "https"]:
+            raise urllib.error.HTTPError(newurl, 403, "Disallowed redirect scheme", headers, fp)
+
+        orig_port = orig_parsed.port or (443 if orig_scheme == "https" else 80)
+        new_port = new_parsed.port or (443 if new_scheme == "https" else 80)
+
+        orig_host = (orig_parsed.hostname or "").lower()
+        new_host = (new_parsed.hostname or "").lower()
+
+        # Enforce exact origin match
+        if orig_scheme != new_scheme or orig_host != new_host or orig_port != new_port:
+            raise urllib.error.HTTPError(
+                newurl,
+                403,
+                f"Cross-origin redirect refused: from {orig_scheme}://{orig_host}:{orig_port} to {new_scheme}://{new_host}:{new_port}",
+                headers,
+                fp
+            )
+
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+SECURE_OPENER = urllib.request.build_opener(StrictSameOriginRedirectHandler())
+
+def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_bytes=MAX_INDEXER_RESPONSE_BYTES, has_credentials=False):
+    parsed = validate_url_transport(url, has_credentials=has_credentials)
     req = urllib.request.Request(url, headers=HEADERS)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
+    with SECURE_OPENER.open(req, timeout=timeout) as resp:
+        # Final response validation: Ensure final URL scheme and host maintain credential safety
+        final_url = resp.geturl()
+        final_parsed = urllib.parse.urlparse(final_url)
+        if final_parsed.scheme.lower() not in ["http", "https"]:
+            raise ValueError(f"Disallowed final URL scheme: {final_parsed.scheme}")
+        if has_credentials and final_parsed.scheme.lower() == "http" and not is_loopback_host(final_parsed.hostname):
+            raise ValueError("Credential protection violation on final response URL")
+
         content = read_bounded(resp, max_bytes)
         if as_json:
             return json.loads(content.decode('utf-8', errors='ignore'))
@@ -250,7 +333,7 @@ def fetch_url(url, as_json=False, as_xml=False, timeout=REQUEST_TIMEOUT, max_byt
         return content.decode('utf-8', errors='ignore')
 
 # -----------------------------------------------------------------------------
-# User Indexers Configuration Manager (Atomic & Symlink-Safe 0600 Storage)
+# User Indexers Configuration Manager (Held Directory FD Boundary & Atomic 0600 Storage)
 # -----------------------------------------------------------------------------
 def get_indexers_config_path():
     if os.path.exists(INDEXERS_CONFIG_PATH):
@@ -274,48 +357,98 @@ def is_safe_regular_file(file_path):
     except Exception:
         return False
 
+def open_directory_chain(target_dir_path, create_missing=False):
+    """
+    Opens and validates every directory component no-follow starting from a held root FD.
+    Ensures no symlinks exist in the path, enforces ownership policy, and returns
+    the held parent directory file descriptor.
+    """
+    abs_path = os.path.abspath(target_dir_path)
+    parts = [p for p in abs_path.split("/") if p]
+
+    # Open root directory FD with O_DIRECTORY | O_RDONLY
+    current_fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    current_uid = os.getuid()
+
+    try:
+        accumulated_path = "/"
+        for part in parts:
+            accumulated_path = os.path.join(accumulated_path, part)
+            open_flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+            try:
+                next_fd = os.open(part, open_flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                if create_missing:
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
+                    next_fd = os.open(part, open_flags, dir_fd=current_fd)
+                else:
+                    os.close(current_fd)
+                    return None
+            except Exception:
+                os.close(current_fd)
+                return None
+
+            st = os.fstat(next_fd)
+            if not stat.S_ISDIR(st.st_mode):
+                os.close(next_fd)
+                os.close(current_fd)
+                return None
+
+            # Ownership policy: Require current user ownership for user paths
+            if accumulated_path.startswith(os.path.expanduser("~")):
+                if st.st_uid != current_uid:
+                    os.close(next_fd)
+                    os.close(current_fd)
+                    return None
+                if part in ["omatorrent", "omarchy"]:
+                    if (st.st_mode & 0o077) != 0 and st.st_uid == current_uid:
+                        try:
+                            os.fchmod(next_fd, 0o700)
+                        except Exception:
+                            pass
+
+            os.close(current_fd)
+            current_fd = next_fd
+
+        return current_fd
+
+    except Exception:
+        try:
+            os.close(current_fd)
+        except Exception:
+            pass
+        return None
+
 def safe_write_private_json(file_path, data):
     """
-    Atomically writes JSON configuration to a temporary file with strict mode
-    0600 and replaces the target file via os.replace.
-    Guarantees no symlink following (O_NOFOLLOW / lstat checks), atomic persistence,
-    and credential confidentiality even under permissive process umasks.
+    Atomically writes JSON configuration using held parent file descriptor boundaries.
+    Opens and validates each directory component with O_NOFOLLOW from a held root FD,
+    creates a unique exclusive 0600 temp file relative to the held parent FD, fsyncs it,
+    atomically replaces relative to the parent FD via renameat, and fsyncs the parent directory.
+    Fails closed without unlinking or mutating unknown/unsafe objects.
     """
-    temp_path = None
+    abs_path = os.path.abspath(file_path)
+    dir_path = os.path.dirname(abs_path)
+    filename = os.path.basename(abs_path)
+
+    parent_fd = open_directory_chain(dir_path, create_missing=True)
+    if parent_fd is None:
+        return False
+
+    temp_filename = None
     try:
-        dir_path = os.path.dirname(file_path)
-        if dir_path:
-            if not os.path.exists(dir_path):
-                os.makedirs(dir_path, mode=0o700, exist_ok=True)
-            dir_st = os.lstat(dir_path)
-            if stat.S_ISLNK(dir_st.st_mode):
-                return False
-            if os.path.basename(dir_path) == "omatorrent":
-                try:
-                    os.chmod(dir_path, 0o700)
-                except Exception:
-                    pass
-
-        # If destination exists and is a symlink or non-regular file, reject/remove
-        if os.path.lexists(file_path):
-            dst_st = os.lstat(file_path)
-            if stat.S_ISLNK(dst_st.st_mode) or not stat.S_ISREG(dst_st.st_mode):
-                try:
-                    os.unlink(file_path)
-                except Exception:
-                    return False
-
         payload = json.dumps(data, indent=2).encode("utf-8")
 
-        # Create temporary file in same directory for atomic rename
-        temp_fd, temp_path = tempfile.mkstemp(
-            prefix=".omatorrent_cfg_",
-            suffix=".tmp",
-            dir=dir_path or "."
-        )
+        # Generate unique temporary filename in the parent directory
+        rand_suffix = f"{os.getpid()}_{random.getrandbits(64):016x}"
+        temp_filename = f".omatorrent_cfg_{rand_suffix}.tmp"
+
+        # Open temporary file with O_CREAT | O_EXCL | O_WRONLY | O_NOFOLLOW relative to parent_fd
+        create_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+        temp_fd = os.open(temp_filename, create_flags, 0o600, dir_fd=parent_fd)
 
         try:
-            # Enforce mode 0600 on the open file descriptor
+            # Enforce 0600 mode on the file descriptor
             os.fchmod(temp_fd, 0o600)
             with open(temp_fd, "wb", closefd=False) as f:
                 f.write(payload)
@@ -324,79 +457,86 @@ def safe_write_private_json(file_path, data):
         finally:
             os.close(temp_fd)
 
-        # Ensure temp file is a regular file owned by current user
-        tmp_st = os.lstat(temp_path)
-        if stat.S_ISLNK(tmp_st.st_mode) or not stat.S_ISREG(tmp_st.st_mode):
-            try:
-                os.unlink(temp_path)
-            except Exception:
-                pass
-            return False
+        # Atomically replace target file relative to the held parent directory FD
+        os.rename(temp_filename, filename, src_dir_fd=parent_fd, dst_dir_fd=parent_fd)
+        temp_filename = None
 
-        # Atomically replace target file
-        os.replace(temp_path, file_path)
+        # Fsync the parent directory descriptor to ensure directory entry durability
         try:
-            os.chmod(file_path, 0o600)
+            os.fsync(parent_fd)
         except Exception:
             pass
+
         return True
 
     except Exception:
-        if temp_path and os.path.lexists(temp_path):
+        if temp_filename:
             try:
-                os.unlink(temp_path)
+                os.unlink(temp_filename, dir_fd=parent_fd)
             except Exception:
                 pass
         return False
+    finally:
+        os.close(parent_fd)
 
 def load_indexers_config():
     conf_file = get_indexers_config_path()
-    
-    # If the file path exists but is a symlink or non-regular file, unlink it
-    if os.path.lexists(conf_file):
-        try:
-            st = os.lstat(conf_file)
-            if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
-                os.unlink(conf_file)
-        except Exception:
-            pass
+    abs_path = os.path.abspath(conf_file)
+    dir_path = os.path.dirname(abs_path)
+    filename = os.path.basename(abs_path)
 
-    if is_safe_regular_file(conf_file):
+    parent_fd = open_directory_chain(dir_path, create_missing=False)
+    if parent_fd is not None:
         try:
-            open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
-            fd = os.open(conf_file, open_flags)
+            # Open leaf filename relative to held parent_fd with O_NOFOLLOW | O_NONBLOCK | O_RDONLY
+            open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
             try:
-                st = os.fstat(fd)
-                if stat.S_ISREG(st.st_mode) and st.st_size <= MAX_CONF_FILE_BYTES:
-                    # Enforce/repair mode 0600 directly on the file descriptor
-                    if (st.st_mode & 0o077) != 0:
-                        try:
-                            os.fchmod(fd, 0o600)
-                        except Exception:
-                            pass
-                    with open(fd, "r", encoding="utf-8", errors="ignore", closefd=False) as f:
-                        data = json.loads(f.read(MAX_CONF_FILE_BYTES))
-                        if isinstance(data, dict) and "indexers" in data and isinstance(data["indexers"], list):
-                            clean_list = []
-                            for idx in data["indexers"]:
-                                if not isinstance(idx, dict):
-                                    continue
-                                clean_list.append({
-                                    "id": sanitize_str(idx.get("id"), 50, default="custom"),
-                                    "name": sanitize_str(idx.get("name"), 80, default="Custom Indexer"),
-                                    "badge": sanitize_str(idx.get("badge"), 12, default="Custom"),
-                                    "enabled": bool(idx.get("enabled", True)),
-                                    "type": sanitize_str(idx.get("type"), 30, default="rss"),
-                                    "url": sanitize_str(idx.get("url"), 1024, default=""),
-                                    "apikey": sanitize_str(idx.get("apikey"), 256, default=""),
-                                    "desc": sanitize_str(idx.get("desc"), 200, default="")
-                                })
-                            return {"version": 1, "indexers": clean_list, "config_path": conf_file}
-            finally:
-                os.close(fd)
-        except Exception:
-            pass
+                fd = os.open(filename, open_flags, dir_fd=parent_fd)
+            except FileNotFoundError:
+                fd = None
+            except Exception:
+                # Symlink, permission failure or non-regular: Fail closed without mutation
+                fd = None
 
+            if fd is not None:
+                try:
+                    st = os.fstat(fd)
+                    current_uid = os.getuid()
+                    # Verify:
+                    # 1. Regular file
+                    # 2. Owned by current user
+                    # 3. Mode policy: Enforce 0600 on the descriptor
+                    # 4. Size within limit
+                    if stat.S_ISREG(st.st_mode) and st.st_uid == current_uid and st.st_size <= MAX_CONF_FILE_BYTES:
+                        if (st.st_mode & 0o077) != 0:
+                            try:
+                                os.fchmod(fd, 0o600)
+                            except Exception:
+                                pass
+                        with open(fd, "r", encoding="utf-8", errors="ignore", closefd=False) as f:
+                            data = json.loads(f.read(MAX_CONF_FILE_BYTES))
+                            if isinstance(data, dict) and "indexers" in data and isinstance(data["indexers"], list):
+                                clean_list = []
+                                for idx in data["indexers"]:
+                                    if not isinstance(idx, dict):
+                                        continue
+                                    clean_list.append({
+                                        "id": sanitize_str(idx.get("id"), 50, default="custom"),
+                                        "name": sanitize_str(idx.get("name"), 80, default="Custom Indexer"),
+                                        "badge": sanitize_str(idx.get("badge"), 12, default="Custom"),
+                                        "enabled": bool(idx.get("enabled", True)),
+                                        "type": sanitize_str(idx.get("type"), 30, default="rss"),
+                                        "url": sanitize_str(idx.get("url"), 1024, default=""),
+                                        "apikey": sanitize_str(idx.get("apikey"), 256, default=""),
+                                        "desc": sanitize_str(idx.get("desc"), 200, default="")
+                                    })
+                                return {"version": 1, "indexers": clean_list, "config_path": conf_file}
+                finally:
+                    os.close(fd)
+        finally:
+            os.close(parent_fd)
+
+    # If file does not exist, safely initialize
     init_data = {
         "version": 1,
         "description": "User-configurable indexers for OmaTorrent. Add custom Torznab (Jackett/Prowlarr), RSS, or API endpoints.",
@@ -420,13 +560,15 @@ def find_qbittorrent_port(preferred_port=8080):
             open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
             fd = os.open(conf_path, open_flags)
             try:
-                with open(fd, 'r', encoding='utf-8', errors='ignore', closefd=False) as f:
-                    text = f.read(MAX_CONF_FILE_BYTES)
-                m = re.search(r'WebUI[\\/:]Port=(\d+)', text)
-                if m:
-                    p = int(m.group(1))
-                    if p not in ports_to_try:
-                        ports_to_try.append(p)
+                st = os.fstat(fd)
+                if stat.S_ISREG(st.st_mode) and st.st_uid == os.getuid():
+                    with open(fd, 'r', encoding='utf-8', errors='ignore', closefd=False) as f:
+                        text = f.read(MAX_CONF_FILE_BYTES)
+                    m = re.search(r'WebUI[\\/:]Port=(\d+)', text)
+                    if m:
+                        p = int(m.group(1))
+                        if p not in ports_to_try:
+                            ports_to_try.append(p)
             finally:
                 os.close(fd)
     except Exception:
@@ -869,7 +1011,7 @@ def search_torznab(indexer, query, category_filter="all"):
         badge = indexer.get("badge") or "Torznab"
         p_name = indexer.get("name") or "Torznab"
 
-        root = fetch_url(url, as_xml=True)
+        root = fetch_url(url, as_xml=True, has_credentials=bool(apikey))
         ns = {"torznab": "http://torznab.com/schemas/2015/feed"}
 
         for item in root.findall('./channel/item'):
